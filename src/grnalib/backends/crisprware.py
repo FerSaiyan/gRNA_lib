@@ -204,6 +204,8 @@ def build_crisprware_index(
     *,
     pam: str = 'NGG',
     spacer_length: int = 20,
+    pam_5_prime: bool = False,
+    bin_width: int | None = None,
     output_directory: str | Path = '.',
     executable: str = 'crisprware',
 ) -> None:
@@ -221,6 +223,12 @@ def build_crisprware_index(
         '-o',
         str(output_directory),
     ]
+    if pam_5_prime:
+        cmd.append('--pam_5_prime')
+    if bin_width is not None:
+        if not 1 <= bin_width <= 15:
+            raise ValueError('bin_width must be between 1 and 15')
+        cmd.extend(['--bin_width', str(bin_width)])
     proc = subprocess.run(cmd, text=True, capture_output=True)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or '').strip()[-5000:]

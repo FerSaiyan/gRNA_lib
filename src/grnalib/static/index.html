@@ -7,8 +7,8 @@
 :root{color-scheme:dark;--bg:#242424;--panel:#2b2b2b;--input:#343638;--button:#1f6aa5;--text:#f3f3f3}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
 .app{width:min(1200px,100%);min-height:1200px;margin:0 auto;padding:10px}.title{font:700 clamp(52px,8vw,120px) Arial;text-align:center;margin:8px 0 16px}
-.frame{background:var(--panel);border-radius:8px;margin-top:10px;padding:10px}.textbox,textarea,input{width:100%;background:var(--input);color:var(--text);border:1px solid #4b4d4f;border-radius:7px;padding:14px;font:700 30px Helvetica;min-height:76px}
-textarea{min-height:160px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.button{width:100%;border:0;border-radius:7px;background:var(--button);color:white;padding:15px;font:700 50px Helvetica;cursor:pointer;margin:12px 0}.button.secondary{font-size:30px}.label{font:700 30px Helvetica;text-align:center;margin:12px}.output{font:16px ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;min-height:300px}.source-note{font:16px Helvetica;opacity:.8;margin:6px 2px 12px}.hidden{display:none}
+.frame{background:var(--panel);border-radius:8px;margin-top:10px;padding:10px}.textbox,textarea,input,select{width:100%;background:var(--input);color:var(--text);border:1px solid #4b4d4f;border-radius:7px;padding:14px;font:700 30px Helvetica;min-height:76px}
+textarea{min-height:160px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.button{width:100%;border:0;border-radius:7px;background:var(--button);color:white;padding:15px;font:700 50px Helvetica;cursor:pointer;margin:12px 0}.button.secondary{font-size:30px}.button.compact{font-size:22px;padding:11px}.label{font:700 30px Helvetica;text-align:center;margin:12px}.output{font:16px ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;min-height:300px}.source-note{font:16px Helvetica;opacity:.8;margin:6px 2px 12px}.hidden{display:none}
 @media(max-width:700px){.row{grid-template-columns:1fr}.textbox,textarea,input{font-size:20px}.button{font-size:34px}.label{font-size:22px}}
 </style>
 </head>
@@ -18,8 +18,14 @@ textarea{min-height:160px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10
     <textarea id="sequence">Input gene sequence from 5' to 3' here</textarea>
     <div class="source-note">Paste DNA, choose a FASTA file, fetch an NCBI assembly/chromosome, or fetch an Ensembl region.</div>
     <input id="sequenceFile" type="file" accept=".fa,.fasta,.fna,.fas,.txt" onchange="loadFastaFile(this,'sequence','sourceStatus')">
-    <div class="row"><input id="ncbiAccession" placeholder="NCBI assembly accession, e.g. GCF_000001405.40"><input id="ncbiChromosome" placeholder="Chromosome (optional), e.g. 17"></div>
-    <button class="button secondary" onclick="fetchNcbi('sequence','ncbiAccession','ncbiChromosome','sourceStatus')">Fetch from NCBI</button>
+    <div class="row"><input id="ncbiOrganism" placeholder="Organism, e.g. Homo sapiens"><button class="button compact" onclick="searchNcbiAssemblies('design','sourceStatus')">Find assemblies</button></div>
+    <select id="designNcbiAssembly" class="hidden" onchange="loadNcbiSequences('design','sourceStatus')"></select>
+    <select id="designNcbiSequence" class="hidden"></select>
+    <div id="designNcbiActions" class="row hidden"><button class="button compact" onclick="fetchSelectedNcbi('sequence','design','sourceStatus')">Download / use cached</button><button class="button compact" onclick="buildSelectedNcbiIndex('design','sourceStatus')">Build / reuse off-target index</button></div>
+    <div id="designIndexOptions" class="row hidden"><input id="designIndexPam" value="NGG" placeholder="Index PAM"><input id="designIndexSpacer" type="number" value="20" placeholder="Spacer length"></div>
+    <select id="designIndexPamSide" class="hidden"><option value="3prime">3′ PAM</option><option value="5prime">5′ PAM</option></select>
+    <div class="row"><input id="ncbiAccession" placeholder="Or enter assembly accession directly"><input id="ncbiChromosome" placeholder="Chromosome (optional), e.g. 17"></div>
+    <button class="button compact" onclick="fetchNcbi('sequence','ncbiAccession','ncbiChromosome','sourceStatus')">Fetch accession directly</button>
     <div class="row"><input id="ensemblSpecies" placeholder="Ensembl species, e.g. homo_sapiens"><input id="ensemblRegion" placeholder="Region, e.g. 17:7668402..7687550:1"></div>
     <button class="button secondary" onclick="fetchEnsembl('sequence','ensemblSpecies','ensemblRegion','sourceStatus')">Fetch Ensembl region</button>
     <div id="sourceStatus" class="source-note"></div>
@@ -33,8 +39,14 @@ textarea{min-height:160px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10
     <textarea id="genome">Input the genome sequence to be screened from 5' to 3' here (optional)</textarea>
     <div class="source-note">For short local references, paste DNA or choose a FASTA record. Whole-genome work should use an indexed backend.</div>
     <input id="genomeFile" type="file" accept=".fa,.fasta,.fna,.fas,.txt" onchange="loadFastaFile(this,'genome','rankSourceStatus')">
-    <div class="row"><input id="rankNcbiAccession" placeholder="NCBI assembly accession"><input id="rankNcbiChromosome" placeholder="Chromosome (optional)"></div>
-    <button class="button secondary" onclick="fetchNcbi('genome','rankNcbiAccession','rankNcbiChromosome','rankSourceStatus')">Fetch/cache NCBI FASTA</button>
+    <div class="row"><input id="rankNcbiOrganism" placeholder="Organism, e.g. Homo sapiens"><button class="button compact" onclick="searchNcbiAssemblies('rank','rankSourceStatus')">Find assemblies</button></div>
+    <select id="rankNcbiAssembly" class="hidden" onchange="loadNcbiSequences('rank','rankSourceStatus')"></select>
+    <select id="rankNcbiSequence" class="hidden"></select>
+    <div id="rankNcbiActions" class="row hidden"><button class="button compact" onclick="fetchSelectedNcbi('genome','rank','rankSourceStatus')">Download / use cached</button><button class="button compact" onclick="buildSelectedNcbiIndex('rank','rankSourceStatus')">Build / reuse off-target index</button></div>
+    <div id="rankIndexOptions" class="row hidden"><input id="rankIndexPam" value="NGG" placeholder="Index PAM"><input id="rankIndexSpacer" type="number" value="20" placeholder="Spacer length"></div>
+    <select id="rankIndexPamSide" class="hidden"><option value="3prime">3′ PAM</option><option value="5prime">5′ PAM</option></select>
+    <div class="row"><input id="rankNcbiAccession" placeholder="Or enter assembly accession directly"><input id="rankNcbiChromosome" placeholder="Chromosome (optional)"></div>
+    <button class="button compact" onclick="fetchNcbi('genome','rankNcbiAccession','rankNcbiChromosome','rankSourceStatus')">Fetch accession directly</button>
     <div id="rankSourceStatus" class="source-note"></div>
     <button class="button" onclick="runRank()">Run</button>
   </div>
@@ -54,6 +66,16 @@ textarea{min-height:160px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10
 const check=document.getElementById('customPamCheck'),pam=document.getElementById('pam');let currentGuides=[];check.addEventListener('change',()=>pam.classList.toggle('hidden',!check.checked));
 function val(id,prefix){const v=document.getElementById(id).value.trim();return v.startsWith(prefix)?'':v}function requestBody(){return{sequence:val('sequence','Input gene sequence'),pam:check.checked?pam.value.trim()||'NGG':null}}
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),j=await r.json();if(!r.ok)throw new Error(j.detail||r.statusText);return j}
+async function getJson(url){const r=await fetch(url),j=await r.json();if(!r.ok)throw new Error(j.detail||r.statusText);return j}
+function sourceIds(prefix){return{organism:prefix==='design'?'ncbiOrganism':'rankNcbiOrganism',assembly:prefix+'NcbiAssembly',sequence:prefix+'NcbiSequence',actions:prefix+'NcbiActions',options:prefix+'IndexOptions',pam:prefix+'IndexPam',spacer:prefix+'IndexSpacer',side:prefix+'IndexPamSide'}}
+async function searchNcbiAssemblies(prefix,statusId){
+  const ids=sourceIds(prefix),status=document.getElementById(statusId),taxon=document.getElementById(ids.organism).value.trim();if(!taxon){status.textContent='Enter an organism name or NCBI TaxID';return}status.textContent='Searching NCBI assemblies...';try{const d=await getJson('/api/sources/ncbi/assemblies?taxon='+encodeURIComponent(taxon)+'&limit=30&source=refseq&exact_match=true');if(!d.assemblies.length)throw new Error('No current RefSeq assemblies found for '+taxon);const select=document.getElementById(ids.assembly);select.innerHTML='';for(const a of d.assemblies){const o=document.createElement('option');o.value=a.accession;const tag=a.is_reference?' [reference]':a.is_representative?' [representative]':'';o.textContent=(a.assembly_name||a.accession)+' — '+a.accession+tag+(a.synonym?' — '+a.synonym:'');select.appendChild(o)}select.classList.remove('hidden');document.getElementById(ids.actions).classList.remove('hidden');document.getElementById(ids.options).classList.remove('hidden');document.getElementById(ids.side).classList.remove('hidden');await loadNcbiSequences(prefix,statusId)}catch(e){status.textContent=e.message}}
+async function loadNcbiSequences(prefix,statusId){
+  const ids=sourceIds(prefix),status=document.getElementById(statusId),accession=document.getElementById(ids.assembly).value;if(!accession)return;status.textContent='Loading chromosome list...';try{const d=await getJson('/api/sources/ncbi/'+encodeURIComponent(accession)+'/sequences?chromosomes_only=true');const select=document.getElementById(ids.sequence);select.innerHTML='<option value="">Whole assembly</option>';for(const s of d.sequences){const o=document.createElement('option');o.value=s.chromosome;o.textContent='chr'+s.chromosome+' — '+(s.refseq_accession||s.genbank_accession||s.sequence_name)+' — '+Number(s.length).toLocaleString()+' bp';select.appendChild(o)}select.classList.remove('hidden');status.textContent='Choose the whole assembly or a chromosome. Downloads are cached locally.'}catch(e){status.textContent=e.message}}
+async function fetchSelectedNcbi(target,prefix,statusId){
+  const ids=sourceIds(prefix),status=document.getElementById(statusId),accession=document.getElementById(ids.assembly).value,chromosome=document.getElementById(ids.sequence).value;status.textContent='Downloading / checking cache...';try{const d=await post('/api/sources/ncbi',{accession,chromosomes:chromosome?[chromosome]:[]});if(d.sequence)document.getElementById(target).value=d.sequence;status.textContent=(d.cached?'Using cached ':'Downloaded ')+d.fasta_path+(d.sequence?('; loaded '+d.selected_record+' into the sequence box'):('; '+(d.sequence_omitted||'kept on disk for indexed analysis')))}catch(e){status.textContent=e.message}}
+async function buildSelectedNcbiIndex(prefix,statusId){
+  const ids=sourceIds(prefix),status=document.getElementById(statusId),accession=document.getElementById(ids.assembly).value,chromosome=document.getElementById(ids.sequence).value;const pamValue=document.getElementById(ids.pam).value.trim()||'NGG',spacer=Number(document.getElementById(ids.spacer).value)||20,side=document.getElementById(ids.side).value;status.textContent='Building or checking off-target index...';try{const d=await post('/api/sources/ncbi/index',{accession,chromosomes:chromosome?[chromosome]:[],pam:pamValue,spacer_length:spacer,pam_side:side});status.textContent=(d.cached?'Reused cached index: ':'Built index: ')+d.index_prefix}catch(e){status.textContent=e.message}}
 function parseFasta(text){
   const records=[];let name=null,parts=[];
   for(const raw of text.split(/\r?\n/)){const line=raw.trim();if(!line)continue;if(line.startsWith('>')){if(name)records.push([name,parts.join('').replace(/\s/g,'')]);name=line.slice(1).trim().split(/\s+/)[0];parts=[]}else{if(!name)throw new Error('FASTA sequence appears before the first header');parts.push(line)}}

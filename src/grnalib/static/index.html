@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gRNA Library</title>
+<style>
+:root{color-scheme:dark;--bg:#242424;--panel:#2b2b2b;--input:#343638;--button:#1f6aa5;--text:#f3f3f3}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+.app{width:min(1200px,100%);min-height:1200px;margin:0 auto;padding:10px}.title{font:700 clamp(52px,8vw,120px) Arial;text-align:center;margin:8px 0 16px}
+.frame{background:var(--panel);border-radius:8px;margin-top:10px;padding:10px}.textbox,textarea,input{width:100%;background:var(--input);color:var(--text);border:1px solid #4b4d4f;border-radius:7px;padding:14px;font:700 30px Helvetica;min-height:76px}
+textarea{min-height:160px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.button{width:100%;border:0;border-radius:7px;background:var(--button);color:white;padding:15px;font:700 50px Helvetica;cursor:pointer;margin:12px 0}.button.secondary{font-size:30px}.label{font:700 30px Helvetica;text-align:center;margin:12px}.output{font:16px ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;min-height:300px}.hidden{display:none}
+@media(max-width:700px){.row{grid-template-columns:1fr}.textbox,textarea,input{font-size:20px}.button{font-size:34px}.label{font-size:22px}}
+</style>
+</head>
+<body><main class="app"><div class="title">Guide RNA Library</div>
+<section id="designScreen">
+  <div class="frame"><textarea id="sequence">Input gene sequence from 5' to 3' here</textarea><div class="row"><label class="label"><input id="customPamCheck" type="checkbox" style="width:auto;min-height:auto"> Not Sp Cas9?</label><input id="pam" class="hidden" placeholder="Enter PAM with IUPAC symbols. Ex: NGG"></div><button class="button" onclick="runDesign()">Run</button><button class="button secondary" onclick="showPrime()">Prime edit</button></div>
+  <div class="frame"><div class="label">Output:{gRNA sequence, position, PAM}</div><div id="out" class="textbox output"></div><button class="button" onclick="showRank()">Rank Candidates</button></div>
+</section>
+<section id="rankScreen" class="hidden">
+  <div class="frame"><textarea id="genome">Input the genome sequence to be screened from 5' to 3' here (optional)</textarea><button class="button" onclick="runRank()">Run</button></div>
+  <div class="frame"><div class="label">gRNA sequences Ranking and component scores:</div><div id="rankOut" class="textbox output"></div><button class="button" onclick="showGuides()">Find new gRNAs</button></div>
+</section>
+<section id="primeScreen" class="hidden">
+  <div class="frame"><textarea id="primeSequence">Input reference sequence from 5' to 3' here</textarea><div class="row"><input id="position" type="number" placeholder="0-based edit position"><input id="ref" placeholder="REF allele"></div><input id="alt" placeholder="ALT allele"><button class="button" onclick="runPrime()">Run</button></div>
+  <div class="frame"><div id="primeOut" class="textbox output"></div><button class="button" onclick="showGuides()">Find new gRNAs</button></div>
+</section>
+</main>
+<script>
+const check=document.getElementById('customPamCheck'),pam=document.getElementById('pam');let currentGuides=[];check.addEventListener('change',()=>pam.classList.toggle('hidden',!check.checked));
+function val(id,prefix){const v=document.getElementById(id).value.trim();return v.startsWith(prefix)?'':v}function requestBody(){return{sequence:val('sequence','Input gene sequence'),pam:check.checked?pam.value.trim()||'NGG':null}}
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),j=await r.json();if(!r.ok)throw new Error(j.detail||r.statusText);return j}
+async function runDesign(){try{const d=await post('/api/guides/design',requestBody());currentGuides=d.guides;document.getElementById('out').textContent=d.guides.map(g=>`${g.spacer} , ${g.strand}:${g.start}-${g.end} , ${g.pam}`).join('\n')}catch(e){document.getElementById('out').textContent=e.message}}
+function screens(show){for(const id of ['designScreen','rankScreen','primeScreen'])document.getElementById(id).classList.toggle('hidden',id!==show)}function showRank(){screens('rankScreen')}function showPrime(){document.getElementById('primeSequence').value=val('sequence','Input gene sequence')||document.getElementById('primeSequence').value;screens('primeScreen')}function showGuides(){screens('designScreen')}
+async function runRank(){try{const b=requestBody(),g=val('genome','Input the genome sequence');if(g)b.genome_sequence=g;const d=await post('/api/guides/rank',b);document.getElementById('rankOut').textContent=d.guides.map(x=>`#${x.rank} ${x.spacer} ${JSON.stringify(x.scores)}`).join('\n')}catch(e){document.getElementById('rankOut').textContent=e.message}}
+async function runPrime(){try{const b={sequence:val('primeSequence','Input reference sequence'),position:Number(document.getElementById('position').value),ref:document.getElementById('ref').value.trim(),alt:document.getElementById('alt').value.trim()};const d=await post('/api/prime/design',b);document.getElementById('primeOut').textContent=d.candidates.map(c=>`#${c.rank} ${c.spacer.spacer} PBS=${c.pbs_length} RTT=${c.rtt_length} extension=${c.extension_sequence} score=${c.scores.structural_prime}`).join('\n')}catch(e){document.getElementById('primeOut').textContent=e.message}}
+</script></body></html>

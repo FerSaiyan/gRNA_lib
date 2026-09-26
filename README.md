@@ -1,124 +1,223 @@
 # gRNA Library
 
-A local-first CRISPR guide-RNA and prime-edit design toolkit with a shared Python core and four frontends: the original-style CustomTkinter UI, a localhost web UI, JSON-friendly CLI commands, and an MCP server for AI agents.
+Design and rank CRISPR guide RNAs and prime-editing candidates from a local Python tool.
 
-## Repository cleanup
+gRNA Library started as an undergraduate project for finding SpCas9 guides. The current version keeps the original desktop interface but moves the design and scoring code into a shared Python package.
 
-Historically, `main` contained ZIP releases while the inspectable TCC-era Python source lived on `master`. This branch is based on `main` and brings the source back into the default-branch lineage. The original `master` files are preserved under `legacy/master_snapshot/`; the top-level legacy filenames remain as compatibility shims.
+You can use it from the Tkinter app, the command line, a localhost web interface, or an MCP client.
 
-After this branch is merged into `main`, `main` should be treated as the canonical development branch. The old `master` branch can remain as historical provenance or be archived/deleted later after confirming no external automation depends on it.
+[![Tests](https://github.com/FerSaiyan/gRNA_lib/actions/workflows/tests.yml/badge.svg)](https://github.com/FerSaiyan/gRNA_lib/actions/workflows/tests.yml)
 
-## What changed
+## What it does
 
-- Correct IUPAC PAM matching instead of assuming only the first PAM base can be `N`.
-- Candidate enumeration on both strands with coordinates normalized to the supplied reference sequence.
-- U6 compatibility now prefixes an extra 5' G when needed; it never mutates the genomic spacer by appending G.
-- `TTTT` is correctly flagged as a Pol III termination risk.
-- GC and sequence warnings are annotations rather than a single opaque hand-written score.
-- Optional Rule Set 3 sequence scoring with a transparent fallback when RS3 is unavailable.
-- Local off-target scanning counts 0–4 mismatch PAM-compatible sites and reports a clearly labeled specificity **proxy**.
-- Optional indexed whole-genome specificity through an externally installed CRISPRware/GuideScan2 or crispr-ots index.
-- Prime-edit enumeration produces PBS/RTT combinations, pegRNA extension sequences, PAM-disruption annotation, and PE3/PE3b-style nicking-guide candidates.
-- Optional learned DeepPrime efficiency scoring through the MIT-licensed GenET package.
-- Tkinter, localhost web, CLI, and MCP all call the same core functions.
+### CRISPR guide design
+
+- Finds candidate guides on both DNA strands.
+- Supports IUPAC PAM sequences and custom PAMs.
+- Keeps genomic spacer sequences separate from expression changes such as an added 5′ G for U6.
+- Flags poly-T and unusual GC content.
+- Supports SpCas9, SpCas9-NG, SaCas9, AsCas12a, and custom nuclease settings.
+
+### Guide ranking
+
+For SpCas9, Rule Set 3 can be used for on-target activity scoring.
+
+For small supplied reference sequences, the built-in scanner reports PAM-compatible off-targets with up to four mismatches. This score is deliberately reported as a local specificity proxy rather than CFD.
+
+For genome-wide searches, gRNA Library can use an external CRISPRware installation with a crispr-ots or GuideScan2 index.
+
+See [Scoring and ranking](docs/SCORING.md) for the ranking rules.
+
+### Prime editing
+
+The prime-editing designer enumerates:
+
+- pegRNA spacers
+- PBS lengths
+- RTT lengths
+- pegRNA extensions
+- nick-to-edit distances
+- PAM-disrupting designs
+- PE3 and PE3b nicking-guide candidates
+
+A simple structural score is available without extra dependencies.
+
+DeepPrime scoring is also supported through the GenET package when installed in a compatible Python environment.
+
+### Interfaces
+
+The same design code is used by:
+
+- CustomTkinter desktop app
+- command-line interface
+- localhost FastAPI interface
+- MCP server
+
+This keeps guide generation and scoring consistent across interfaces.
 
 ## Install
 
-Basic package:
+Clone the repository:
+
+```bash
+git clone https://github.com/FerSaiyan/gRNA_lib.git
+cd gRNA_lib
+```
+
+Install the core package:
 
 ```bash
 python -m pip install -e .
 ```
 
-Common frontends and Rule Set 3:
+For the desktop UI, web interface, MCP server, and Rule Set 3:
 
 ```bash
 python -m pip install -e '.[ui,web,mcp,rs3]'
 ```
 
-DeepPrime/GenET currently fits best in a separate Python 3.10 environment:
+Python 3.10 or newer is required.
 
-```bash
-python -m pip install -e '.[deepprime]'
-```
+## Desktop app
 
-CRISPRware is intentionally not a Python dependency of this project. Install it separately if you want indexed whole-genome specificity; see [docs/BACKENDS.md](docs/BACKENDS.md) for backend and licensing notes.
-
-## Tkinter
+Run:
 
 ```bash
 grna-lib-tk
-# or: python GUI_gRNA.py
 ```
 
-The default guide-design flow intentionally retains the original visual hierarchy: 1200×1200 window, large `Guide RNA Library` title, large Helvetica controls, stacked input/output frames, and full-width Run/Rank buttons.
-
-## Localhost web UI
+The old entry point still works:
 
 ```bash
-uvicorn grnalib.web:app --reload
+python GUI_gRNA.py
 ```
 
-Open `http://127.0.0.1:8000`. The HTML/CSS mirrors the Tkinter hierarchy instead of redesigning it around a generic dashboard. Advanced indexed/learned scorer parameters are also available through the API, CLI and MCP without forcing them into the simple default UI.
+The current UI stays close to the original TCC-era application rather than replacing it with a separate desktop design.
 
-## CLI
+## Command line
 
-Commands emit JSON so agents do not have to scrape human-oriented terminal tables.
+Find guides:
+
+```bash
+grna-lib guide design \
+  --sequence AAAAGCGCGCGCGCGCGCGCGCGCTGGAAAA
+```
+
+Rank guides against a supplied background sequence:
+
+```bash
+grna-lib guide rank \
+  --sequence AAAAGCGCGCGCGCGCGCGCGCGCTGGAAAA \
+  --genome genome.fa
+```
+
+Check which optional scoring backends are installed:
 
 ```bash
 grna-lib backend status
+```
 
-grna-lib guide design --sequence ACGT...
-grna-lib guide rank --sequence ACGT... --genome genome.fa
+### Genome-wide off-target scoring
 
+If CRISPRware and a compatible genome index are installed:
+
+```bash
 grna-lib guide rank \
   --sequence ACGT... \
   --crisprware-index /path/to/index \
   --chromosome chr7 \
   --reference-start 55019016
+```
 
+`--reference-start` is the zero-based genomic coordinate corresponding to the first base of the supplied sequence.
+
+Setup and licensing details are in [Optional scoring backends](docs/BACKENDS.md).
+
+## Prime editing
+
+Basic candidate generation:
+
+```bash
 grna-lib prime design \
   --sequence ACGT... \
-  --position 72 --ref G --alt A \
-  --scorer deepprime --pe-system PE2max --cell-type HEK293T
+  --position 72 \
+  --ref G \
+  --alt A
+```
+
+DeepPrime scoring:
+
+```bash
+grna-lib prime design \
+  --sequence ACGT... \
+  --position 72 \
+  --ref G \
+  --alt A \
+  --scorer deepprime \
+  --pe-system PE2max \
+  --cell-type HEK293T
+```
+
+DeepPrime is provided through GenET. Its current dependency stack is best installed in a separate Python 3.10 environment:
+
+```bash
+python -m pip install -e '.[deepprime]'
+```
+
+## Web interface
+
+Install the web dependencies and start the local server:
+
+```bash
+python -m pip install -e '.[web]'
+uvicorn grnalib.web:app --reload
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000
 ```
 
 ## MCP
+
+Install the MCP dependency:
+
+```bash
+python -m pip install -e '.[mcp]'
+```
+
+Start the server:
 
 ```bash
 grna-lib-mcp
 ```
 
-Tools exposed:
+Available tools include guide design and ranking, prime-edit design, backend checks, off-target index construction, and candidate explanations.
 
-- `get_backend_status`
-- `design_grnas`
-- `rank_grnas`
-- `build_offtarget_index`
-- `design_prime_candidates`
-- `explain_candidate`
+## Scoring notes
 
-## Scoring policy
+Guide ranking follows this order:
 
-Ranking is deliberately hierarchical rather than mixing unrelated scores into a falsely precise weighted sum:
+1. sequence filters
+2. indexed specificity, when available
+3. local specificity proxy, when a background sequence is supplied
+4. Rule Set 3 for SpCas9, when installed
+5. built-in sequence score as a fallback
 
-1. hard sequence filters;
-2. indexed specificity when configured, otherwise the local specificity proxy when supplied;
-3. RS3 sequence score when installed, otherwise a transparent sequence-quality fallback.
+Prime-edit candidates keep the built-in structural score even when DeepPrime is used. DeepPrime results also record the PE system, cell type, backend, and package version used to produce the prediction.
 
-If an indexed run was requested and no indexed score is returned for a guide, that missing value is not treated as perfect specificity.
+More detail is available in [docs/SCORING.md](docs/SCORING.md).
 
-Prime-edit candidates preserve the transparent `structural_prime` score. When GenET/DeepPrime is requested and returns a learned score, ranking prefers the learned score and keeps PE-system/cell-type/version provenance.
+## Current limitations
 
-See [docs/SCORING.md](docs/SCORING.md) and [docs/BACKENDS.md](docs/BACKENDS.md).
+The built-in off-target scanner is meant for short sequences, not whole genomes. Use an indexed backend for genome-wide specificity analysis.
 
-## Important limitations
+Prime-edit extension generation currently targets Cas9-family systems with a 3′ PAM.
 
-- The built-in off-target implementation is intended for local/small reference sequences. Use an indexed backend for production whole-genome specificity.
-- CRISPRware is an optional external integration and is **not vendored**. Its current upstream license is noncommercial; review upstream terms for your intended use.
-- DeepPrime is optional and its current GenET dependency stack is best isolated in Python 3.10.
-- Prime extension generation currently targets Cas9-family 3'-PAM systems.
-- PRIDICT2 is not yet integrated; no score is labeled as PRIDICT2 unless a genuine model adapter is added.
+PRIDICT2 is not integrated yet.
+
+CRISPRware is an external dependency and is not distributed with this repository. Its upstream license currently restricts commercial use; see [docs/BACKENDS.md](docs/BACKENDS.md).
 
 ## Tests
 
@@ -126,3 +225,11 @@ See [docs/SCORING.md](docs/SCORING.md) and [docs/BACKENDS.md](docs/BACKENDS.md).
 python -m pip install -e '.[dev]'
 pytest
 ```
+
+The test suite currently runs on Python 3.11 and 3.12 in GitHub Actions.
+
+## Project history
+
+The original TCC-era implementation is preserved under [`legacy/master_snapshot`](legacy/master_snapshot/).
+
+The current implementation lives in `src/grnalib`.

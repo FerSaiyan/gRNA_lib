@@ -4,7 +4,7 @@ from importlib.resources import files
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import (
     PrimeEdit,
@@ -54,7 +54,7 @@ class GenomeProfileRequest(BaseModel):
 
 class NcbiSourceRequest(BaseModel):
     accession: str
-    chromosomes: list[str] = []
+    chromosomes: list[str] = Field(default_factory=list)
     record: str | None = None
     inline_limit: int = 10_000_000
 

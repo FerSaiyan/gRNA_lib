@@ -4,7 +4,7 @@ from importlib.resources import files
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import (
     PrimeEdit,
@@ -16,6 +16,7 @@ from . import (
     score_prime_candidates_deepprime,
 )
 from .backends import profile_with_crispr_ots, score_with_crisprware
+from .genome_sources import download_ncbi_genome, fetch_ensembl_region, read_fasta_record
 
 app = FastAPI(title='gRNA Library')
 
@@ -49,6 +50,18 @@ class GenomeProfileRequest(BaseModel):
     mismatches: int = 4
     hit_limit: int = 100
     crispr_ots_executable: str = 'crispr-ots'
+
+
+class NcbiSourceRequest(BaseModel):
+    accession: str
+    chromosomes: list[str] = Field(default_factory=list)
+    record: str | None = None
+    inline_limit: int = 10_000_000
+
+
+class EnsemblSourceRequest(BaseModel):
+    species: str
+    region: str
 
 
 class PrimeRequest(BaseModel):
@@ -140,6 +153,50 @@ def api_profile(request: GenomeProfileRequest):
             hit_limit=request.hit_limit,
         )
         return {'nuclease': spec.__dict__, **result.to_dict()}
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post('/api/sources/ncbi')
+def api_source_ncbi(request: NcbiSourceRequest):
+    try:
+        result = download_ncbi_genome(
+            request.accession,
+            chromosomes=request.chromosomes,
+        )
+        payload = result.to_dict()
+        selected = request.record
+        if selected is None and len(result.records) == 1:
+            selected = result.records[0].name
+        if selected is not None:
+            info = next((item for item in result.records if item.name == selected), None)
+            if info is None:
+                raise ValueError(f'FASTA record {selected!r} is not present in the downloaded package')
+            if info.length <= request.inline_limit:
+                _, sequence = read_fasta_record(result.fasta_path, selected)
+                payload['selected_record'] = selected
+                payload['sequence'] = sequence
+            else:
+                payload['selected_record'] = selected
+                payload['sequence_omitted'] = (
+                    f'record is {info.length:,} bp; it was cached on disk instead of copied into the browser'
+                )
+        return payload
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post('/api/sources/ensembl')
+def api_source_ensembl(request: EnsemblSourceRequest):
+    try:
+        sequence = fetch_ensembl_region(request.species, request.region)
+        return {
+            'source': 'Ensembl REST',
+            'species': request.species,
+            'region': request.region,
+            'length': len(sequence),
+            'sequence': sequence,
+        }
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

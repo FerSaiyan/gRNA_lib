@@ -20,6 +20,7 @@ from .backends import (
     profile_with_crispr_ots,
     score_with_crisprware,
 )
+from .genome_sources import download_ncbi_genome, fetch_ensembl_region
 
 app = typer.Typer(help='Local-first CRISPR guide and prime-edit design toolkit.')
 guide_app = typer.Typer(help='Guide-RNA design, ranking and off-target profiling.')
@@ -67,6 +68,33 @@ def genome_index(
         executable=crisprware_executable,
     )
     _dump({'ok': True, 'backend': 'crisprware', 'output_directory': str(output_directory)})
+
+
+@genome_app.command('fetch-ncbi')
+def genome_fetch_ncbi(
+    accession: str = typer.Option(..., help='NCBI assembly accession (GCF_ or GCA_)'),
+    chromosome: list[str] | None = typer.Option(None, '--chromosome', help='Chromosome label; repeat for multiple'),
+    cache_dir: Path | None = typer.Option(None, help='Optional cache directory'),
+    force: bool = typer.Option(False, help='Re-download even if cached'),
+):
+    """Download and cache an assembly or selected chromosomes from NCBI Datasets."""
+    result = download_ncbi_genome(
+        accession,
+        chromosomes=chromosome,
+        cache_dir=cache_dir,
+        force=force,
+    )
+    _dump(result.to_dict())
+
+
+@genome_app.command('fetch-ensembl')
+def genome_fetch_ensembl(
+    species: str = typer.Option(..., help='Ensembl species name or alias'),
+    region: str = typer.Option(..., help='Region such as 17:7668402..7687550:1'),
+):
+    """Fetch a genomic region from Ensembl REST and print the sequence as JSON."""
+    sequence = fetch_ensembl_region(species, region)
+    _dump({'source': 'Ensembl REST', 'species': species, 'region': region, 'sequence': sequence})
 
 
 @guide_app.command('design')

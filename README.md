@@ -15,17 +15,34 @@ After this branch is merged into `main`, `main` should be treated as the canonic
 - U6 compatibility now prefixes an extra 5' G when needed; it never mutates the genomic spacer by appending G.
 - `TTTT` is correctly flagged as a Pol III termination risk.
 - GC and sequence warnings are annotations rather than a single opaque hand-written score.
-- Optional Rule Set 3 sequence scoring (`pip install .[rs3]`) with a transparent fallback when RS3 is unavailable.
-- Local off-target scanning counts 0–4 mismatch PAM-compatible sites and reports a clearly labeled specificity **proxy**. It does not claim to be CFD/GuideScan2.
+- Optional Rule Set 3 sequence scoring with a transparent fallback when RS3 is unavailable.
+- Local off-target scanning counts 0–4 mismatch PAM-compatible sites and reports a clearly labeled specificity **proxy**.
+- Optional indexed whole-genome specificity through an externally installed CRISPRware/GuideScan2 or crispr-ots index.
 - Prime-edit enumeration produces PBS/RTT combinations, pegRNA extension sequences, PAM-disruption annotation, and PE3/PE3b-style nicking-guide candidates.
+- Optional learned DeepPrime efficiency scoring through the MIT-licensed GenET package.
 - Tkinter, localhost web, CLI, and MCP all call the same core functions.
 
 ## Install
 
+Basic package:
+
 ```bash
 python -m pip install -e .
+```
+
+Common frontends and Rule Set 3:
+
+```bash
 python -m pip install -e '.[ui,web,mcp,rs3]'
 ```
+
+DeepPrime/GenET currently fits best in a separate Python 3.10 environment:
+
+```bash
+python -m pip install -e '.[deepprime]'
+```
+
+CRISPRware is intentionally not a Python dependency of this project. Install it separately if you want indexed whole-genome specificity; see [docs/BACKENDS.md](docs/BACKENDS.md) for backend and licensing notes.
 
 ## Tkinter
 
@@ -42,16 +59,28 @@ The default guide-design flow intentionally retains the original visual hierarch
 uvicorn grnalib.web:app --reload
 ```
 
-Open `http://127.0.0.1:8000`. The HTML/CSS mirrors the Tkinter hierarchy instead of redesigning it around a generic dashboard.
+Open `http://127.0.0.1:8000`. The HTML/CSS mirrors the Tkinter hierarchy instead of redesigning it around a generic dashboard. Advanced indexed/learned scorer parameters are also available through the API, CLI and MCP without forcing them into the simple default UI.
 
 ## CLI
 
-All main commands emit JSON so agents do not have to scrape human-oriented terminal tables.
+Commands emit JSON so agents do not have to scrape human-oriented terminal tables.
 
 ```bash
+grna-lib backend status
+
 grna-lib guide design --sequence ACGT...
 grna-lib guide rank --sequence ACGT... --genome genome.fa
-grna-lib prime design --sequence ACGT... --position 42 --ref G --alt A
+
+grna-lib guide rank \
+  --sequence ACGT... \
+  --crisprware-index /path/to/index \
+  --chromosome chr7 \
+  --reference-start 55019016
+
+grna-lib prime design \
+  --sequence ACGT... \
+  --position 72 --ref G --alt A \
+  --scorer deepprime --pe-system PE2max --cell-type HEK293T
 ```
 
 ## MCP
@@ -62,8 +91,10 @@ grna-lib-mcp
 
 Tools exposed:
 
+- `get_backend_status`
 - `design_grnas`
 - `rank_grnas`
+- `build_offtarget_index`
 - `design_prime_candidates`
 - `explain_candidate`
 
@@ -72,16 +103,22 @@ Tools exposed:
 Ranking is deliberately hierarchical rather than mixing unrelated scores into a falsely precise weighted sum:
 
 1. hard sequence filters;
-2. specificity when a genome/background sequence is available;
+2. indexed specificity when configured, otherwise the local specificity proxy when supplied;
 3. RS3 sequence score when installed, otherwise a transparent sequence-quality fallback.
 
-Prime-edit candidates currently use a transparent structural fallback that prefers PAM disruption and PE3b-compatible nicking guides. The API was designed so PRIDICT2/DeepPrime adapters can be added without changing the frontends or output schema.
+If an indexed run was requested and no indexed score is returned for a guide, that missing value is not treated as perfect specificity.
 
-## Important limitations in this first modernization patch
+Prime-edit candidates preserve the transparent `structural_prime` score. When GenET/DeepPrime is requested and returns a learned score, ranking prefers the learned score and keeps PE-system/cell-type/version provenance.
 
-- The built-in off-target implementation is intended for local/small reference sequences. Whole-genome production workflows should use an indexed engine such as GuideScan2/CRISPRware and feed its specificity output through a future scorer adapter.
-- The built-in prime score is **not** PRIDICT2 or DeepPrime. The candidate-generation data model is ready for those learned scorers, but they are intentionally not vendored or silently approximated.
+See [docs/SCORING.md](docs/SCORING.md) and [docs/BACKENDS.md](docs/BACKENDS.md).
+
+## Important limitations
+
+- The built-in off-target implementation is intended for local/small reference sequences. Use an indexed backend for production whole-genome specificity.
+- CRISPRware is an optional external integration and is **not vendored**. Its current upstream license is noncommercial; review upstream terms for your intended use.
+- DeepPrime is optional and its current GenET dependency stack is best isolated in Python 3.10.
 - Prime extension generation currently targets Cas9-family 3'-PAM systems.
+- PRIDICT2 is not yet integrated; no score is labeled as PRIDICT2 unless a genuine model adapter is added.
 
 ## Tests
 

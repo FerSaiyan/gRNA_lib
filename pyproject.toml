@@ -15,8 +15,17 @@ ui = ["customtkinter>=5.2"]
 web = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2"]
 mcp = ["mcp>=1.0"]
 rs3 = ["rs3"]
+deepprime = ["genet; python_version < '3.11'"]
 dev = ["pytest>=8"]
-all = ["customtkinter>=5.2", "fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2", "mcp>=1.0", "rs3"]
+all = [
+  "customtkinter>=5.2",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2",
+  "mcp>=1.0",
+  "rs3",
+  "genet; python_version < '3.11'",
+]
 
 [project.scripts]
 grna-lib = "grnalib.cli:main"

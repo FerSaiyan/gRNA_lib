@@ -15,7 +15,13 @@ from .backends import (
     profile_with_crispr_ots,
     score_with_crisprware,
 )
-from .genome_sources import download_ncbi_genome, fetch_ensembl_region
+from .genome_sources import (
+    download_ncbi_genome,
+    fetch_ensembl_region,
+    list_ncbi_sequences,
+    search_ncbi_assemblies,
+)
+from .reference_workflows import build_or_reuse_ncbi_index
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -119,6 +125,61 @@ def profile_genome_offtargets(
 
 
 @mcp.tool()
+def search_ncbi_genome_assemblies(
+    taxon: str,
+    limit: int = 20,
+    source: str = 'refseq',
+    exact_match: bool = True,
+    reference_only: bool = False,
+) -> list[dict]:
+    """Find current NCBI assemblies from an organism/common name or TaxID."""
+    return [
+        item.to_dict()
+        for item in search_ncbi_assemblies(
+            taxon,
+            limit=limit,
+            source=source,
+            exact_match=exact_match,
+            reference_only=reference_only,
+        )
+    ]
+
+
+@mcp.tool()
+def list_ncbi_assembly_sequences(
+    accession: str,
+    chromosomes_only: bool = True,
+) -> list[dict]:
+    """List chromosome/sequence metadata for one NCBI assembly."""
+    return [
+        item.to_dict()
+        for item in list_ncbi_sequences(accession, chromosomes_only=chromosomes_only)
+    ]
+
+
+@mcp.tool()
+def build_ncbi_offtarget_index(
+    accession: str,
+    chromosomes: list[str] | None = None,
+    pam: str = 'NGG',
+    spacer_length: int = 20,
+    pam_side: str = '3prime',
+    bin_width: int | None = None,
+    force: bool = False,
+) -> dict:
+    """Download/cache an NCBI reference and build or reuse a matching crispr-ots index."""
+    return build_or_reuse_ncbi_index(
+        accession,
+        chromosomes=chromosomes,
+        pam=pam,
+        spacer_length=spacer_length,
+        pam_side=pam_side,
+        bin_width=bin_width,
+        force=force,
+    ).to_dict()
+
+
+@mcp.tool()
 def fetch_ncbi_genome(
     accession: str,
     chromosomes: list[str] | None = None,
@@ -146,6 +207,8 @@ def build_offtarget_index(
     fasta: str,
     pam: str = 'NGG',
     spacer_length: int = 20,
+    pam_side: str = '3prime',
+    bin_width: int | None = None,
     output_directory: str = '.',
 ) -> dict:
     """Build a CRISPRware crispr-ots off-target index from a local FASTA."""
@@ -153,6 +216,8 @@ def build_offtarget_index(
         fasta,
         pam=pam,
         spacer_length=spacer_length,
+        pam_5_prime=pam_side == '5prime',
+        bin_width=bin_width,
         output_directory=output_directory,
     )
     return {'ok': True, 'backend': 'crisprware', 'output_directory': output_directory}

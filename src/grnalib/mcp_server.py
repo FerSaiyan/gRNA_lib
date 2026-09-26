@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-from . import PrimeEdit, design_guides, design_prime_edit, rank_guides, resolve_nuclease
+from . import (
+    PrimeEdit,
+    design_guides,
+    design_prime_edit,
+    rank_guides,
+    rank_prime_candidates,
+    resolve_nuclease,
+    score_prime_candidates_deepprime,
+)
+from .backends import backend_status, build_crisprware_index, score_with_crisprware
 
 try:
     from mcp.server.fastmcp import FastMCP
-except ImportError:  # pragma: no cover
+except ImportError:
     try:
         from fastmcp import FastMCP  # type: ignore
-    except ImportError as exc:  # pragma: no cover
+    except ImportError as exc:
         raise RuntimeError('Install gRNA-lib with the mcp extra: pip install .[mcp]') from exc
 
 mcp = FastMCP('gRNA Library')
+
+
+@mcp.tool()
+def get_backend_status() -> dict:
+    """Report whether optional RS3, DeepPrime/GenET and CRISPRware backends are installed."""
+    return backend_status()
 
 
 @mcp.tool()
@@ -26,11 +41,62 @@ def rank_grnas(
     genome_sequence: str | None = None,
     nuclease: str = 'SpCas9',
     pam: str | None = None,
+    crisprware_index: str | None = None,
+    chromosome: str | None = None,
+    reference_start: int = 0,
+    threads: int = 4,
+    mismatches: int = 3,
+    rna_bulges: int = 0,
+    dna_bulges: int = 0,
 ) -> list[dict]:
-    """Rank guides hierarchically and return component scores plus warnings."""
+    """Rank guides with optional indexed whole-genome specificity."""
     spec = resolve_nuclease(nuclease, pam=pam)
     guides = design_guides(sequence, spec)
-    return [g.to_dict() for g in rank_guides(guides, spec=spec, genome_sequence=genome_sequence)]
+    indexed = None
+    source = None
+    if crisprware_index:
+        if not chromosome:
+            raise ValueError('chromosome is required when crisprware_index is supplied')
+        result = score_with_crisprware(
+            guides,
+            spec,
+            index=crisprware_index,
+            chromosome=chromosome,
+            reference_start=reference_start,
+            threads=threads,
+            mismatches=mismatches,
+            rna_bulges=rna_bulges,
+            dna_bulges=dna_bulges,
+        )
+        indexed = result.scores
+        source = f'{result.backend}:{result.index}:{result.specificity_column}'
+    return [
+        g.to_dict()
+        for g in rank_guides(
+            guides,
+            spec=spec,
+            genome_sequence=genome_sequence,
+            indexed_specificity=indexed,
+            indexed_specificity_source=source,
+        )
+    ]
+
+
+@mcp.tool()
+def build_offtarget_index(
+    fasta: str,
+    pam: str = 'NGG',
+    spacer_length: int = 20,
+    output_directory: str = '.',
+) -> dict:
+    """Build a CRISPRware crispr-ots off-target index from a local FASTA."""
+    build_crisprware_index(
+        fasta,
+        pam=pam,
+        spacer_length=spacer_length,
+        output_directory=output_directory,
+    )
+    return {'ok': True, 'backend': 'crisprware', 'output_directory': output_directory}
 
 
 @mcp.tool()
@@ -42,23 +108,41 @@ def design_prime_candidates(
     nuclease: str = 'SpCas9',
     pam: str | None = None,
     limit: int = 100,
+    scorer: str = 'structural',
+    pe_system: str = 'PE2max',
+    cell_type: str = 'HEK293T',
 ) -> list[dict]:
-    """Enumerate pegRNA PBS/RTT combinations and PE3/PE3b nicking-guide candidates."""
+    """Enumerate and rank pegRNAs, optionally using learned DeepPrime efficiency."""
     spec = resolve_nuclease(nuclease, pam=pam)
-    candidates = design_prime_edit(sequence, PrimeEdit(position, ref, alt), spec)
+    edit = PrimeEdit(position, ref, alt)
+    candidates = design_prime_edit(sequence, edit, spec)
+    if scorer.lower() == 'deepprime':
+        candidates = score_prime_candidates_deepprime(
+            sequence,
+            edit,
+            candidates,
+            pe_system=pe_system,
+            cell_type=cell_type,
+            pam=spec.pam,
+        )
+    elif scorer.lower() != 'structural':
+        raise ValueError('scorer must be structural or deepprime')
+    candidates = rank_prime_candidates(candidates)
     return [c.to_dict() for c in candidates[:limit]]
 
 
 @mcp.tool()
 def explain_candidate(candidate: dict) -> dict:
-    """Return the auditable ranking fields from a previously returned candidate."""
+    """Return auditable ranking fields from a previously returned candidate."""
     return {
         'id': candidate.get('id'),
         'rank': candidate.get('rank'),
         'scores': candidate.get('scores', {}),
         'warnings': candidate.get('warnings', []),
         'interpretation': (
-            'Ranking is hierarchical: hard filters, specificity when available, then learned RS3 or the transparent fallback.'
+            'Guide ranking is hierarchical: hard filters, indexed specificity when available, '
+            'then learned on-target activity. Prime ranking prefers a learned DeepPrime score '
+            'when present and otherwise uses the structural fallback.'
         ),
     }
 

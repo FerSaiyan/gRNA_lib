@@ -44,6 +44,12 @@ A simple structural score is available without extra dependencies.
 
 DeepPrime scoring is also supported through the GenET package when installed in a compatible Python environment.
 
+### Reference sequence sources
+
+Sequences can be pasted directly, loaded from a local FASTA file, fetched by NCBI assembly accession (optionally limited to selected chromosomes), or fetched as a genomic region from Ensembl. NCBI downloads are cached locally so the same assembly does not need to be transferred again.
+
+Whole-genome off-target work should still use an indexed backend rather than feeding a multi-gigabase FASTA into the built-in local scanner.
+
 ### Interfaces
 
 The same design code is used by:
@@ -109,6 +115,22 @@ Rank guides against a supplied background sequence:
 grna-lib guide rank \
   --sequence AAAAGCGCGCGCGCGCGCGCGCGCTGGAAAA \
   --genome genome.fa
+```
+
+Fetch a genome or selected chromosome from NCBI Datasets:
+
+```bash
+grna-lib genome fetch-ncbi \
+  --accession GCF_000001405.40 \
+  --chromosome 17
+```
+
+Fetch a smaller locus from Ensembl:
+
+```bash
+grna-lib genome fetch-ensembl \
+  --species homo_sapiens \
+  --region '17:7668402..7687550:1'
 ```
 
 Check which optional scoring backends are installed:

@@ -62,6 +62,33 @@ Optional controls:
 
 The indexed result is stored separately from the local proxy and is preferred for ranking when available.
 
+### Whole-genome mismatch profiles
+
+For a per-guide view of the genomic matches behind the aggregate score, use the `crispr-ots` profiler directly:
+
+```bash
+grna-lib guide profile \
+  --sequence ACGT... \
+  --crispr-ots-index indexes/hg38_crisprots/hg38_crisprots \
+  --chromosome chr7 \
+  --reference-start 55019016 \
+  --mismatches 4
+```
+
+The profile reports, for every candidate guide:
+
+- the indexed specificity value returned by the search;
+- off-target counts for each mismatch distance from 0 through the requested maximum;
+- the number of additional exact genomic copies after excluding the coordinate-matched intended target;
+- whether the intended target was found at the supplied chromosome/start/strand;
+- a bounded list of representative genomic loci ordered by mismatch count.
+
+`--hit-limit` limits only the loci retained in the JSON response. It does not truncate the mismatch counts.
+
+The profiler uses the current GuideScan2-compatible per-hit CSV emitted by `crispr-ots enumerate`. The intended target is excluded only when its chromosome, 0-based genomic start, strand and zero-mismatch status agree with the coordinates supplied to gRNA Library. If that exact row cannot be identified, zero-mismatch hits are retained rather than guessed away.
+
+Current `crispr-ots` bin scanning supports mismatch enumeration but rejects non-zero RNA/DNA bulges. Use the CRISPRware/GuideScan2 scoring path when bulge-aware specificity is required.
+
 ## DeepPrime through GenET
 
 Learned prime-edit efficiency is available through the MIT-licensed GenET package maintained by the DeepPrime authors.

@@ -14,10 +14,15 @@ from . import (
     resolve_nuclease,
     score_prime_candidates_deepprime,
 )
-from .backends import backend_status, build_crisprware_index, score_with_crisprware
+from .backends import (
+    backend_status,
+    build_crisprware_index,
+    profile_with_crispr_ots,
+    score_with_crisprware,
+)
 
 app = typer.Typer(help='Local-first CRISPR guide and prime-edit design toolkit.')
-guide_app = typer.Typer(help='Guide-RNA design and ranking.')
+guide_app = typer.Typer(help='Guide-RNA design, ranking and off-target profiling.')
 prime_app = typer.Typer(help='Prime-edit candidate design.')
 genome_app = typer.Typer(help='Genome/off-target index operations.')
 backend_app = typer.Typer(help='Optional scoring backend information.')
@@ -127,6 +132,36 @@ def guide_rank(
         indexed_specificity_source=source,
     )
     _dump([g.to_dict() for g in ranked])
+
+
+@guide_app.command('profile')
+def guide_profile(
+    sequence: str = typer.Option(..., help='Target sequence containing candidate guides'),
+    crispr_ots_index: Path = typer.Option(..., help='crispr-ots index prefix or .crot file'),
+    chromosome: str = typer.Option(..., help='Chromosome/contig for the target sequence'),
+    reference_start: int = typer.Option(0, help='0-based genomic coordinate of sequence base 0'),
+    nuclease: str = 'SpCas9',
+    pam: str | None = None,
+    threads: int = 4,
+    mismatches: int = 4,
+    hit_limit: int = typer.Option(100, help='Representative loci retained per guide; counts are not truncated'),
+    crispr_ots_executable: str = 'crispr-ots',
+):
+    """Profile whole-genome off-target mismatch classes and representative loci."""
+    spec = resolve_nuclease(nuclease, pam=pam)
+    guides = design_guides(sequence, spec)
+    result = profile_with_crispr_ots(
+        guides,
+        spec,
+        index=crispr_ots_index,
+        chromosome=chromosome,
+        reference_start=reference_start,
+        executable=crispr_ots_executable,
+        threads=threads,
+        mismatches=mismatches,
+        hit_limit=hit_limit,
+    )
+    _dump(result.to_dict())
 
 
 @prime_app.command('design')

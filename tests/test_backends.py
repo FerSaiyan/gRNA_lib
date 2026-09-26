@@ -4,6 +4,7 @@ import pytest
 
 from grnalib import PrimeEdit, design_guides, design_prime_edit, rank_guides, resolve_nuclease
 from grnalib.backends.crisprware import build_crisprware_bed
+from grnalib.backends.offtarget_profile import build_crisprots_kmers, parse_crisprots_csv
 from grnalib.prime_scoring import (
     apply_deepprime_rows,
     deepprime_input_sequence,
@@ -136,3 +137,77 @@ def test_missing_indexed_score_is_not_treated_as_perfect():
     assert ranked[0].id == guides[0].id
     missing = next(g for g in ranked if g.id == guides[1].id)
     assert missing.scores['specificity_used_for_ranking'] == 'indexed-missing'
+
+
+def test_crisprots_kmers_uses_guide_id_and_true_genomic_position():
+    seq = 'AAAA' + 'ACACACACACACACACACAC' + 'AGG' + 'AAAA'
+    spec = resolve_nuclease()
+    guide = next(g for g in design_guides(seq, spec) if g.strand == '+')
+    text = build_crisprots_kmers([guide], spec, chromosome='chr7', reference_start=1000)
+    lines = text.strip().splitlines()
+    assert lines[0] == 'id,sequence,pam,chromosome,position,sense'
+    fields = lines[1].split(',')
+    assert fields[0] == guide.id
+    assert fields[1] == guide.spacer
+    assert fields[2] == 'NGG'
+    assert fields[3] == 'chr7'
+    assert int(fields[4]) == 1000 + guide.start + 1
+    assert fields[5] == '+'
+
+
+def test_crisprots_profile_excludes_only_coordinate_matched_intended_target(tmp_path):
+    seq = 'AAAA' + 'ACACACACACACACACACAC' + 'AGG' + 'AAAA'
+    spec = resolve_nuclease()
+    guide = next(g for g in design_guides(seq, spec) if g.strand == '+')
+    intended = 1000 + guide.start
+    csv_path = tmp_path / 'offtargets.csv'
+    csv_path.write_text(
+        'id,sequence,match_chrm,match_position,match_strand,match_distance,specificity\n'
+        f'{guide.id},{guide.spacer}NGG,chr7,{intended},+,0,0.42\n'
+        f'{guide.id},{guide.spacer}NGG,chr7,{intended + 100},+,0,0.42\n'
+        f'{guide.id},{guide.spacer}NGG,chr8,2000,-,1,0.42\n'
+        f'{guide.id},{guide.spacer}NGG,chr2,3000,+,2,0.42\n'
+        f'{guide.id},{guide.spacer}NGG,chr3,4000,-,2,0.42\n',
+        encoding='utf-8',
+    )
+    profiles = parse_crisprots_csv(
+        csv_path,
+        [guide],
+        spec,
+        chromosome='chr7',
+        reference_start=1000,
+        max_mismatches=3,
+        hit_limit=2,
+    )
+    profile = profiles[guide.id]
+    assert profile.intended_target_found is True
+    assert profile.specificity == 0.42
+    assert profile.mismatch_counts == {0: 1, 1: 1, 2: 2, 3: 0}
+    assert profile.exact_duplicate_sites == 1
+    assert profile.total_off_targets == 4
+    assert len(profile.representative_hits) == 2
+    assert [hit.mismatches for hit in profile.representative_hits] == [0, 1]
+
+
+def test_crisprots_profile_keeps_zero_mismatch_when_intended_locus_not_found(tmp_path):
+    seq = 'AAAA' + 'ACACACACACACACACACAC' + 'AGG' + 'AAAA'
+    spec = resolve_nuclease()
+    guide = next(g for g in design_guides(seq, spec) if g.strand == '+')
+    csv_path = tmp_path / 'offtargets.csv'
+    csv_path.write_text(
+        'id,sequence,match_chrm,match_position,match_strand,match_distance,specificity\n'
+        f'{guide.id},{guide.spacer}NGG,chrUn,999,+,0,0.2\n',
+        encoding='utf-8',
+    )
+    profile = parse_crisprots_csv(
+        csv_path,
+        [guide],
+        spec,
+        chromosome='chr7',
+        reference_start=1000,
+        max_mismatches=2,
+    )[guide.id]
+    assert profile.intended_target_found is False
+    assert profile.exact_duplicate_sites == 1
+    assert profile.total_off_targets == 1
+    assert any('intended target row was not identified' in note for note in profile.notes)

@@ -9,7 +9,12 @@ from . import (
     resolve_nuclease,
     score_prime_candidates_deepprime,
 )
-from .backends import backend_status, build_crisprware_index, score_with_crisprware
+from .backends import (
+    backend_status,
+    build_crisprware_index,
+    profile_with_crispr_ots,
+    score_with_crisprware,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -24,7 +29,7 @@ mcp = FastMCP('gRNA Library')
 
 @mcp.tool()
 def get_backend_status() -> dict:
-    """Report whether optional RS3, DeepPrime/GenET and CRISPRware backends are installed."""
+    """Report whether optional RS3, DeepPrime/GenET, CRISPRware and crispr-ots backends are installed."""
     return backend_status()
 
 
@@ -80,6 +85,36 @@ def rank_grnas(
             indexed_specificity_source=source,
         )
     ]
+
+
+@mcp.tool()
+def profile_genome_offtargets(
+    sequence: str,
+    crispr_ots_index: str,
+    chromosome: str,
+    reference_start: int = 0,
+    nuclease: str = 'SpCas9',
+    pam: str | None = None,
+    mismatches: int = 4,
+    threads: int = 4,
+    hit_limit: int = 100,
+    crispr_ots_executable: str = 'crispr-ots',
+) -> dict:
+    """Enumerate whole-genome off-target mismatch classes and representative loci."""
+    spec = resolve_nuclease(nuclease, pam=pam)
+    guides = design_guides(sequence, spec)
+    result = profile_with_crispr_ots(
+        guides,
+        spec,
+        index=crispr_ots_index,
+        chromosome=chromosome,
+        reference_start=reference_start,
+        executable=crispr_ots_executable,
+        threads=threads,
+        mismatches=mismatches,
+        hit_limit=hit_limit,
+    )
+    return result.to_dict()
 
 
 @mcp.tool()

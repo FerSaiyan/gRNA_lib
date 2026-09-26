@@ -15,7 +15,7 @@ from . import (
     resolve_nuclease,
     score_prime_candidates_deepprime,
 )
-from .backends import score_with_crisprware
+from .backends import profile_with_crispr_ots, score_with_crisprware
 
 app = FastAPI(title='gRNA Library')
 
@@ -34,6 +34,21 @@ class GuideRequest(BaseModel):
     mismatches: int = 3
     rna_bulges: int = 0
     dna_bulges: int = 0
+
+
+class GenomeProfileRequest(BaseModel):
+    sequence: str
+    crispr_ots_index: str
+    chromosome: str
+    reference_start: int = 0
+    nuclease: str = 'SpCas9'
+    pam: str | None = None
+    spacer_length: int | None = None
+    pam_side: str | None = None
+    threads: int = 4
+    mismatches: int = 4
+    hit_limit: int = 100
+    crispr_ots_executable: str = 'crispr-ots'
 
 
 class PrimeRequest(BaseModel):
@@ -99,6 +114,32 @@ def api_rank(request: GuideRequest):
             indexed_specificity_source=source,
         )
         return {'nuclease': spec.__dict__, 'guides': [g.to_dict() for g in ranked]}
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post('/api/guides/profile')
+def api_profile(request: GenomeProfileRequest):
+    try:
+        spec = resolve_nuclease(
+            request.nuclease,
+            pam=request.pam,
+            spacer_length=request.spacer_length,
+            pam_side=request.pam_side,
+        )
+        guides = design_guides(request.sequence, spec)
+        result = profile_with_crispr_ots(
+            guides,
+            spec,
+            index=request.crispr_ots_index,
+            chromosome=request.chromosome,
+            reference_start=request.reference_start,
+            executable=request.crispr_ots_executable,
+            threads=request.threads,
+            mismatches=request.mismatches,
+            hit_limit=request.hit_limit,
+        )
+        return {'nuclease': spec.__dict__, **result.to_dict()}
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

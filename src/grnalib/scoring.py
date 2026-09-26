@@ -115,6 +115,16 @@ def rank_guides(
         if external_score is not None:
             specificity = external_score
             guide.scores['specificity_used_for_ranking'] = 'indexed'
+        elif indexed_specificity is not None:
+            # An indexed run was requested but this guide received no result.
+            # Never interpret missing indexed evidence as perfect specificity.
+            specificity = local_specificity if local_specificity is not None else -1.0
+            guide.scores['indexed_specificity'] = {
+                'score': None,
+                'source': indexed_specificity_source or 'external-index',
+                'note': 'indexed backend returned no specificity score for this guide',
+            }
+            guide.scores['specificity_used_for_ranking'] = 'indexed-missing'
         elif local_specificity is not None:
             specificity = local_specificity
             guide.scores['specificity_used_for_ranking'] = 'local-proxy'

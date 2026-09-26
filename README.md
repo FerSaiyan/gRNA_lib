@@ -24,7 +24,7 @@ For SpCas9, Rule Set 3 can be used for on-target activity scoring.
 
 For small supplied reference sequences, the built-in scanner reports PAM-compatible off-targets with up to four mismatches. This score is deliberately reported as a local specificity proxy rather than CFD.
 
-For genome-wide searches, gRNA Library can use an external CRISPRware installation with a crispr-ots or GuideScan2 index.
+For genome-wide searches, gRNA Library can use an external CRISPRware installation with a crispr-ots or GuideScan2 index. A separate `guide profile` command reports mismatch counts and representative genomic off-target loci from a crispr-ots index.
 
 See [Scoring and ranking](docs/SCORING.md) for the ranking rules.
 
@@ -131,7 +131,18 @@ grna-lib guide rank \
 
 `--reference-start` is the zero-based genomic coordinate corresponding to the first base of the supplied sequence.
 
-Setup and licensing details are in [Optional scoring backends](docs/BACKENDS.md).
+To inspect the mismatch distribution and genomic loci behind the score:
+
+```bash
+grna-lib guide profile \
+  --sequence ACGT... \
+  --crispr-ots-index /path/to/index \
+  --chromosome chr7 \
+  --reference-start 55019016 \
+  --mismatches 4
+```
+
+Setup, output fields, and licensing details are in [Optional scoring backends](docs/BACKENDS.md).
 
 ## Prime editing
 

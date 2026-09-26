@@ -46,7 +46,7 @@ DeepPrime scoring is also supported through the GenET package when installed in 
 
 ### Reference sequence sources
 
-Sequences can be pasted directly, loaded from a local FASTA file, fetched by NCBI assembly accession (optionally limited to selected chromosomes), or fetched as a genomic region from Ensembl. NCBI downloads are cached locally so the same assembly does not need to be transferred again.
+Sequences can be pasted directly, loaded from a local FASTA file, fetched from NCBI, or fetched as a genomic region from Ensembl. NCBI references can be found by organism/common name or TaxID, then narrowed to an assembly and chromosome without knowing an accession in advance. Downloads are cached locally so the same reference does not need to be transferred again.
 
 Whole-genome off-target work should still use an indexed backend rather than feeding a multi-gigabase FASTA into the built-in local scanner.
 
@@ -117,13 +117,37 @@ grna-lib guide rank \
   --genome genome.fa
 ```
 
+Find assemblies by organism:
+
+```bash
+grna-lib genome search --taxon "Homo sapiens"
+```
+
+Inspect the chromosomes/sequences in an assembly:
+
+```bash
+grna-lib genome sequences --accession GCF_000001405.40
+```
+
 Fetch a genome or selected chromosome from NCBI Datasets:
+
 
 ```bash
 grna-lib genome fetch-ncbi \
   --accession GCF_000001405.40 \
   --chromosome 17
 ```
+
+Build or reuse a cached whole-genome off-target index directly from an NCBI reference:
+
+```bash
+grna-lib genome index-ncbi \
+  --accession GCF_000001405.40 \
+  --pam NGG \
+  --spacer-length 20
+```
+
+For a chromosome-only index, add `--chromosome 17`. The cache key includes the assembly, chromosome set, PAM, spacer length, and PAM orientation, so an incompatible index is not silently reused.
 
 Fetch a smaller locus from Ensembl:
 

@@ -3,6 +3,7 @@ from copy import deepcopy
 import pytest
 
 from grnalib import PrimeEdit, design_guides, design_prime_edit, rank_guides, resolve_nuclease
+from grnalib.backends import crisprware
 from grnalib.backends.crisprware import build_crisprware_bed
 from grnalib.backends.offtarget_profile import build_crisprots_kmers, parse_crisprots_csv
 from grnalib.prime_scoring import (
@@ -211,3 +212,32 @@ def test_crisprots_profile_keeps_zero_mismatch_when_intended_locus_not_found(tmp
     assert profile.exact_duplicate_sites == 1
     assert profile.total_off_targets == 1
     assert any('intended target row was not identified' in note for note in profile.notes)
+
+
+def test_crisprware_index_passes_5prime_pam_and_bin_width(tmp_path, monkeypatch):
+    fasta = tmp_path / "ref.fa"
+    fasta.write_text(">chr1\nACGT\n", encoding="utf-8")
+    monkeypatch.setattr(crisprware.shutil, "which", lambda executable: "/usr/bin/crisprware")
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, text, capture_output):
+        seen["cmd"] = cmd
+        return Result()
+
+    monkeypatch.setattr(crisprware.subprocess, "run", fake_run)
+    crisprware.build_crisprware_index(
+        fasta,
+        pam="TTTV",
+        spacer_length=23,
+        pam_5_prime=True,
+        bin_width=14,
+        output_directory=tmp_path / "out",
+    )
+    assert "--pam_5_prime" in seen["cmd"]
+    assert "--bin_width" in seen["cmd"]
+    assert seen["cmd"][seen["cmd"].index("--bin_width") + 1] == "14"

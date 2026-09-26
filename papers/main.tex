@@ -23,20 +23,20 @@
 \maketitle
 
 \begin{abstract}
-Computational guide-RNA design has evolved from human-oriented web tools for a limited set of CRISPR systems into a broad ecosystem that includes configurable local software, whole-genome off-target search, and learned models for guide and prime-editing efficiency. At the same time, scientific software is increasingly executed through scripts, APIs, and AI agents. We present \grnalib{}, a local-first Python toolkit that exposes a shared CRISPR design core through a desktop application, localhost web interface, JSON command-line interface, FastAPI endpoints, and a native Model Context Protocol (MCP) server. The software supports candidate enumeration on both strands using IUPAC PAM motifs, configurable spacer length and PAM orientation, sequence-aware filtering, optional Rule Set 3 on-target scoring, indexed whole-genome specificity, mismatch-class profiling of genomic off-targets, and prime-editing candidate generation with optional DeepPrime scoring. We do not claim arbitrary-genome or custom-PAM support as unique capabilities, because mature frameworks now provide them. Instead, the present contribution is an integration architecture that makes deterministic, inspectable CRISPR design functions available through the same data model to both human users and software agents. We describe the architecture, compare it with established tools, and define a validation plan for candidate enumeration, off-target analysis, prime-editing design, and agent-facing reproducibility.
+CRISPR guide-design software now spans web applications, programmable frameworks, genome-scale off-target engines, and learned models for guide and prime-editing efficiency. \grnalib{} is a local-first Python toolkit that exposes one design core through a desktop application, localhost web interface, JSON command-line interface, FastAPI endpoints, and a native Model Context Protocol (MCP) server. It enumerates candidates on both strands using IUPAC PAM motifs and configurable spacer/PAM geometry, applies sequence filters and optional Rule Set 3 scoring, connects to indexed whole-genome specificity backends, profiles genomic matches by mismatch class, and generates prime-editing candidates with optional DeepPrime scoring. Reference sequence can be pasted, loaded from a FASTA file, downloaded from NCBI Datasets by assembly accession and chromosome, or fetched from Ensembl by genomic region. Custom genomes and custom PAMs are already supported by several mature tools; \grnalib{} focuses on making guide design, prime-editing design, scoring, and off-target profiling available through one tested data model to both human interfaces and software agents. This paper describes the architecture, its position among established tools, and a validation plan for the scientific and agent-facing interfaces.
 \end{abstract}
 
 \section{Introduction}
 
 Guide selection strongly affects the activity, specificity, and interpretability of CRISPR experiments. CHOPCHOP, CRISPOR, Cas-OFFinder, FlashFry, CRISPick, GuideScan2, and related tools have progressively expanded candidate discovery, ranking, and off-target analysis \citep{labun2019chopchop,concordet2018crispor,bae2014casoffinder,mckenna2018flashfry,schmidt2025guidescan2}. Several now support non-canonical PAMs, custom genomes, or user-defined sequences.
 
-The software landscape has also become more general. The crisprVerse ecosystem provides a programmable framework across organisms, nucleases, and multiple CRISPR modalities \citep{hoberecht2022crisprverse}. CRISPRitz adds exhaustive, variant-aware off-target analysis with mismatches and bulges \citep{cancellieri2020crispritz}, while CRISPRware integrates contextual genomic data with guide design and indexed off-target scoring \citep{malekos2025crisprware}. Thus, custom-genome and custom-PAM support are no longer, by themselves, unresolved research gaps.
+Programmable frameworks now cover many cases that once required tool-specific web workflows. The crisprVerse ecosystem supports multiple organisms, nucleases, and CRISPR modalities \citep{hoberecht2022crisprverse}. CRISPRitz adds variant-aware off-target analysis with mismatches and bulges \citep{cancellieri2020crispritz}, and CRISPRware combines contextual genomic data with guide design and indexed off-target scoring \citep{malekos2025crisprware}. Custom-genome and custom-PAM support are therefore shared capabilities across several current tools.
 
 Prime editing adds further design dimensions, including primer-binding-site (PBS) and reverse-transcription-template (RTT) selection and, for PE3/PE3b, a second nicking guide. pegFinder and PrimeDesign introduced practical design workflows \citep{chow2021pegfinder,hsu2021primedesign}, while PRIDICT/PRIDICT2.0 and DeepPrime introduced learned efficiency models \citep{mathis2023pridict,mathis2025pridict2,yu2023deepprime}.
 
-A newer gap concerns how these capabilities are exposed to computational agents. MCP, introduced in late 2024, standardizes model-discoverable tools with structured schemas \citep{anthropic2024mcp,mcp2026tools}. CRISPR-GPT subsequently demonstrated the value of agentic assistance for gene-editing workflows \citep{qu2026crisprgpt}. Its published guide-selection agent, however, relies on pre-designed CRISPick tables, and the complete system code and prompts were not fully released. In our survey of established guide-design packages, we found no documented native MCP server exposing deterministic guide design, ranking, prime-edit design, and off-target profiling as callable tools.
+Agent-facing interfaces are less standardized than guide-design algorithms. MCP, introduced in late 2024, defines model-discoverable tools with structured schemas \citep{anthropic2024mcp,mcp2026tools}. CRISPR-GPT demonstrated agentic assistance for gene-editing workflows \citep{qu2026crisprgpt}; its published guide-selection agent uses pre-designed CRISPick tables, and the complete system code and prompts were not fully released. In the established guide-design packages reviewed here, we found no documented native MCP server exposing guide design, ranking, prime-edit design, and off-target profiling as deterministic callable tools.
 
-\grnalib{} began as an undergraduate project in September 2023. The original application emphasized local sequence input, simple candidate enumeration, and a lightweight desktop interface. The current project preserves that local-first philosophy but replaces the monolithic implementation with a shared Python core, explicit data models, tested ranking logic, optional modern scoring backends, and multiple frontends. Its primary contribution is therefore architectural rather than a new biological scoring model.
+\grnalib{} began as an undergraduate project in September 2023. The original application emphasized local sequence input, simple candidate enumeration, and a lightweight desktop interface. The current implementation uses a shared Python core, explicit data models, tested ranking logic, optional scoring backends, and several frontends. The main software contribution is this integration layer rather than a new biological scoring model.
 
 \section{Related work and current positioning}
 
@@ -50,7 +50,7 @@ CRISPick is optimized for CRISPR knockout, activation, and interference and curr
 
 Cas-OFFinder performs exhaustive off-target searches against chosen genomes and user-defined PAM patterns \citep{bae2014casoffinder}. FlashFry focuses on fast large-scale target discovery and scoring \citep{mckenna2018flashfry}. CRISPRitz adds variant-aware mismatch and bulge searches plus functional annotation \citep{cancellieri2020crispritz}. GuideScan2 builds high-specificity guide databases for custom genomes \citep{schmidt2025guidescan2}.
 
-The strongest overlap with the flexibility goals of \grnalib{} is crisprVerse. Its crisprDesign framework supports custom sequences, arbitrary organisms, and extensible nuclease definitions with rich genomic annotation \citep{hoberecht2022crisprverse}. This makes an important distinction clear: arbitrary-organism design and configurable nuclease geometry are useful features of \grnalib{}, but they are not unique in 2026.
+crisprVerse has the broadest overlap with the flexible-design goals of \grnalib{}. Its crisprDesign framework already supports custom sequences, arbitrary organisms, extensible nuclease definitions, and rich genomic annotation \citep{hoberecht2022crisprverse}. Arbitrary-organism design and configurable nuclease geometry are therefore shared capabilities rather than differentiators.
 
 CRISPRware similarly represents the modern direction of context-aware design and indexed off-target search \citep{malekos2025crisprware}. \grnalib{} therefore uses CRISPRware/\texttt{crispr-ots} as an optional backend instead of reproducing its genome-indexing algorithms.
 
@@ -58,13 +58,13 @@ CRISPRware similarly represents the modern direction of context-aware design and
 
 PrimeDesign enumerates pegRNA spacers, PBS/RTT combinations, and nicking guides and supports pooled and saturation-mutagenesis modes \citep{hsu2021primedesign,primedesignGithub}. pegFinder offers web-based pegRNA design \citep{chow2021pegfinder}. PRIDICT2.0 and DeepPrime address prediction rather than merely enumeration \citep{mathis2025pridict2,yu2023deepprime}.
 
-The goal of \grnalib{} is not to replace these specialized systems. Prime-editing design is instead exposed through the same Python/CLI/web/MCP architecture as conventional guide design. When DeepPrime is available, its learned score is stored alongside the built-in structural score with provenance rather than replacing it.
+PrimeDesign and related packages remain more specialized prime-editing tools. In \grnalib{}, prime-editing design shares the same Python, CLI, web, and MCP architecture as conventional guide design. When DeepPrime is available, its learned score is stored alongside the built-in structural score with provenance.
 
 \subsection{Agentic systems}
 
-MCP allows language models to discover and invoke tools using structured inputs and outputs \citep{mcp2026tools}. This differs from placing an LLM inside a CRISPR application. A domain tool exposed through MCP can remain deterministic and independently testable while allowing many compatible clients to call it.
+MCP allows language models to discover and invoke tools through structured inputs and outputs \citep{mcp2026tools}. The CRISPR calculations can therefore remain deterministic and independently testable while different compatible clients call them.
 
-CRISPR-GPT provides evidence that agentic assistance is useful for gene-editing workflows \citep{qu2026crisprgpt}. \grnalib{} takes a narrower approach: it exposes the computational design engine itself as agent-callable infrastructure. The model decides when to invoke a tool; candidate enumeration, coordinate handling, mismatch counting, and model scoring remain conventional software operations.
+CRISPR-GPT provides evidence that agentic assistance is useful for gene-editing workflows \citep{qu2026crisprgpt}. \grnalib{} exposes the design engine itself as agent-callable infrastructure. The model can choose an operation, while candidate enumeration, coordinate handling, mismatch counting, and model scoring remain conventional software operations.
 
 \begin{table*}[t]
 \centering
@@ -101,6 +101,13 @@ Enumeration operates on both strands and uses the full IUPAC alphabet for PAM ma
 This sequence-defined abstraction describes candidate geometry, not biological equivalence. A custom PAM can be enumerated even when no validated activity model exists for the corresponding nuclease. Learned activity scores are only applied in contexts supported by their underlying models.
 
 The genomic spacer remains immutable. If U6 expression benefits from an additional leading G, this is represented separately in the expressed spacer. Poly-T runs and unusual GC content are reported explicitly.
+
+
+\subsection{Reference sequence acquisition}
+
+Sequence input is not limited to pasted DNA. The desktop and localhost web interfaces can open local FASTA files and require explicit record selection when a file contains multiple records, preventing accidental concatenation across chromosome boundaries. NCBI Datasets assemblies can be fetched by GCF/GCA accession and optionally restricted to selected chromosomes before transfer; downloaded FASTA files are cached locally \citep{ncbiDatasets2026}. Ensembl REST provides direct retrieval of smaller genomic regions \citep{ensemblRest2026}. The CLI, FastAPI layer, and MCP server expose the same source functions.
+
+Large genome records are kept on disk rather than copied into a browser text box. Whole-genome specificity analysis uses an indexed backend, while pasted or in-memory reference sequence remains appropriate for locus-scale design and small-reference checks.
 
 \subsection{Scoring and ranking}
 
@@ -147,7 +154,7 @@ The MCP layer is intentionally thin. An agent calling a guide-ranking tool invok
 
 When the project began in 2023, mainstream web tools were already sophisticated and some already supported non-canonical PAMs. Their default web interaction nevertheless commonly started from a preconfigured organism/reference genome. Local custom-genome operation was possible in CHOPCHOP and CRISPOR but required local resource preparation \citep{crisporManual,chopchopInstructions}.
 
-The original motivation was therefore not unprecedented flexibility, but a simpler local workflow: supply sequence, define PAM behavior, and inspect candidates directly. Modern \grnalib{} extends this to FASTA-derived whole-genome indexes without requiring an internal species registry. Mature alternatives such as crisprVerse and GuideScan2 now solve the same custom-genome problem in other ecosystems \citep{hoberecht2022crisprverse,schmidt2025guidescan2}.
+The 2023 application reduced that setup to a local sequence-and-PAM workflow. The current version accepts pasted sequence, local FASTA records, NCBI Datasets assemblies or selected chromosomes, and Ensembl genomic regions; NCBI downloads are cached locally \citep{ncbiDatasets2026,ensemblRest2026}. Arbitrary FASTA references can also be used to build whole-genome indexes without maintaining a species registry. crisprVerse and GuideScan2 address the same custom-reference problem in other software ecosystems \citep{hoberecht2022crisprverse,schmidt2025guidescan2}.
 
 \subsection{Separating nuclease geometry from model availability}
 
@@ -155,7 +162,7 @@ The project separates candidate enumeration from model support. New PAM/spacer g
 
 \subsection{Conventional and prime editing behind one contract}
 
-Guide design and prime-editing design are commonly handled by separate packages. \grnalib{} places both behind a shared data and interface architecture. The contribution is workflow integration, not superiority to PrimeDesign, PRIDICT2.0, or DeepPrime on their specialized tasks.
+Guide design and prime-editing design are commonly handled by separate packages. \grnalib{} places both behind a shared data and interface architecture, while PrimeDesign, PRIDICT2.0, and DeepPrime remain specialized references for their respective prime-editing tasks.
 
 \subsection{Agent-ready scientific computation}
 
@@ -193,9 +200,9 @@ Define matched Python, CLI, API, and MCP calls and verify equivalent structured 
 
 \section{Discussion}
 
-The current CRISPR software ecosystem is considerably more flexible than the early web-tool landscape. crisprVerse already provides a strong general framework for arbitrary organisms and nucleases, while GuideScan2, CRISPRitz, Cas-OFFinder, and CRISPRware provide mature specialized genome-search capabilities \citep{hoberecht2022crisprverse,schmidt2025guidescan2,cancellieri2020crispritz,bae2014casoffinder,malekos2025crisprware}. The value of \grnalib{} should therefore be evaluated as an integration and interface contribution rather than by claiming novelty for custom PAMs or custom genomes alone.
+Current CRISPR software already covers arbitrary organisms, configurable nucleases, variant-aware off-target search, and high-throughput indexed design \citep{hoberecht2022crisprverse,schmidt2025guidescan2,cancellieri2020crispritz,bae2014casoffinder,malekos2025crisprware}. \grnalib{} adds a compact integration layer across those design concerns, with one data model and several human- and agent-facing interfaces.
 
-The distinctive current design is one deterministic core across desktop, browser, CLI, Python, API, and MCP access. This supports conventional visual workflows while making the same operations directly composable by scripts and AI agents.
+One deterministic core serves desktop, browser, CLI, Python, API, and MCP access. A visual workflow and an agent call therefore use the same candidate-generation and ranking code.
 
 Important limitations remain. The built-in local off-target scanner is not a whole-genome engine. The current mismatch profiler does not itself model bulges. Learned activity models are nuclease- and context-specific. Prime editing is presently limited to Cas9-family 3$'$-PAM geometry. PRIDICT2.0 and transcript-aware CRISPRko/CRISPRi/CRISPRa ranking are not yet integrated. Experimental validation is required before rankings can be interpreted as evidence of editing efficiency or safety.
 

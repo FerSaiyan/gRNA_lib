@@ -179,16 +179,19 @@ class App(customtkinter.CTk):
                     accession,
                     chromosomes=[chromosome] if chromosome else None,
                 )
-                self.after(0, lambda: self._finish_ncbi(result))
+                self.after(0, lambda result=result: self._finish_ncbi(result))
             except Exception as exc:
-                self.after(0, lambda: self._finish_remote_error(exc, self.ncbi_fetch_button))
+                button = self.ncbi_fetch_button
+                self.after(0, lambda exc=exc, button=button: self._finish_remote_error(exc, button))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _finish_ncbi(self, result):
         self.cached_ncbi = result
-        self.ncbi_fetch_button.configure(state='normal')
-        self.ncbi_load_button.configure(state='normal')
+        if hasattr(self, 'ncbi_fetch_button') and self.ncbi_fetch_button.winfo_exists():
+            self.ncbi_fetch_button.configure(state='normal')
+        if hasattr(self, 'ncbi_load_button') and self.ncbi_load_button.winfo_exists():
+            self.ncbi_load_button.configure(state='normal')
         if len(result.records) == 1 and result.records[0].length <= 10_000_000:
             _, sequence = read_fasta_record(result.fasta_path, result.records[0].name)
             self._put_sequence(sequence, f'{result.records[0].name} from NCBI')
@@ -231,15 +234,17 @@ class App(customtkinter.CTk):
                 sequence = fetch_ensembl_region(species, region)
                 self.after(
                     0,
-                    lambda: self._finish_ensembl(sequence, species, region),
+                    lambda sequence=sequence, species=species, region=region: self._finish_ensembl(sequence, species, region),
                 )
             except Exception as exc:
-                self.after(0, lambda: self._finish_remote_error(exc, self.ensembl_fetch_button))
+                button = self.ensembl_fetch_button
+                self.after(0, lambda exc=exc, button=button: self._finish_remote_error(exc, button))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _finish_ensembl(self, sequence: str, species: str, region: str):
-        self.ensembl_fetch_button.configure(state='normal')
+        if hasattr(self, 'ensembl_fetch_button') and self.ensembl_fetch_button.winfo_exists():
+            self.ensembl_fetch_button.configure(state='normal')
         self._put_sequence(sequence, f'{species} {region} from Ensembl')
 
     def _finish_remote_error(self, exc: Exception, button):

@@ -11,8 +11,11 @@ from .genome_sources import (
     download_ncbi_genome,
     fasta_records,
     fetch_ensembl_region,
+    list_ncbi_sequences,
     read_fasta_record,
+    search_ncbi_assemblies,
 )
+from .reference_workflows import build_or_reuse_ncbi_index
 
 
 class App(customtkinter.CTk):
@@ -102,24 +105,102 @@ class App(customtkinter.CTk):
         row += 1
 
         if include_ncbi:
+            self.ncbi_organism = customtkinter.CTkEntry(
+                self.input_frame,
+                placeholder_text='Organism, e.g. Homo sapiens',
+                font=('Helvetica', 22, 'bold'),
+            )
+            self.ncbi_organism.grid(row=row, column=0, pady=8, padx=10, sticky='ew')
+            self.ncbi_search_button = customtkinter.CTkButton(
+                self.input_frame,
+                text='Find NCBI assemblies',
+                command=self.search_ncbi_organism,
+                font=('Helvetica', 22, 'bold'),
+            )
+            self.ncbi_search_button.grid(row=row, column=1, pady=8, padx=10, sticky='ew')
+            row += 1
+
+            self.ncbi_assembly_map = {}
+            self.ncbi_assembly_menu = customtkinter.CTkOptionMenu(
+                self.input_frame,
+                values=['Search assemblies first'],
+                command=lambda _: self.load_ncbi_sequences(),
+                state='disabled',
+                font=('Helvetica', 20, 'bold'),
+            )
+            self.ncbi_assembly_menu.grid(row=row, column=0, pady=8, padx=10, sticky='ew', columnspan=2)
+            row += 1
+
+            self.ncbi_sequence_map = {'Whole assembly': None}
+            self.ncbi_sequence_menu = customtkinter.CTkOptionMenu(
+                self.input_frame,
+                values=['Whole assembly'],
+                state='disabled',
+                font=('Helvetica', 20, 'bold'),
+            )
+            self.ncbi_sequence_menu.grid(row=row, column=0, pady=8, padx=10, sticky='ew', columnspan=2)
+            row += 1
+
+            self.ncbi_download_button = customtkinter.CTkButton(
+                self.input_frame,
+                text='Download / use cached reference',
+                command=self.download_selected_ncbi,
+                state='disabled',
+                font=('Helvetica', 22, 'bold'),
+            )
+            self.ncbi_download_button.grid(row=row, column=0, pady=8, padx=10, sticky='ew')
+            self.ncbi_index_button = customtkinter.CTkButton(
+                self.input_frame,
+                text='Build / reuse off-target index',
+                command=self.build_selected_ncbi_index,
+                state='disabled',
+                font=('Helvetica', 22, 'bold'),
+            )
+            self.ncbi_index_button.grid(row=row, column=1, pady=8, padx=10, sticky='ew')
+            row += 1
+
+            self.index_pam = customtkinter.CTkEntry(
+                self.input_frame,
+                placeholder_text='Index PAM',
+                font=('Helvetica', 20, 'bold'),
+            )
+            self.index_pam.insert(0, 'NGG')
+            self.index_pam.grid(row=row, column=0, pady=8, padx=10, sticky='ew')
+            self.index_spacer = customtkinter.CTkEntry(
+                self.input_frame,
+                placeholder_text='Spacer length',
+                font=('Helvetica', 20, 'bold'),
+            )
+            self.index_spacer.insert(0, '20')
+            self.index_spacer.grid(row=row, column=1, pady=8, padx=10, sticky='ew')
+            row += 1
+            self.index_pam_side = customtkinter.CTkOptionMenu(
+                self.input_frame,
+                values=['3prime', '5prime'],
+                font=('Helvetica', 20, 'bold'),
+            )
+            self.index_pam_side.set('3prime')
+            self.index_pam_side.grid(row=row, column=0, pady=8, padx=10, sticky='ew', columnspan=2)
+            row += 1
+
             self.ncbi_accession = customtkinter.CTkEntry(
                 self.input_frame,
-                placeholder_text='NCBI assembly accession, e.g. GCF_000001405.40',
-                font=('Helvetica', 22, 'bold'),
+                placeholder_text='Or enter NCBI assembly accession directly',
+                font=('Helvetica', 20, 'bold'),
             )
             self.ncbi_accession.grid(row=row, column=0, pady=8, padx=10, sticky='ew')
             self.ncbi_chromosome = customtkinter.CTkEntry(
                 self.input_frame,
-                placeholder_text='Chromosome (optional), e.g. 17',
-                font=('Helvetica', 22, 'bold'),
+                placeholder_text='Chromosome (optional)',
+                font=('Helvetica', 20, 'bold'),
             )
             self.ncbi_chromosome.grid(row=row, column=1, pady=8, padx=10, sticky='ew')
             row += 1
             self.ncbi_fetch_button = customtkinter.CTkButton(
                 self.input_frame,
-                text='Fetch from NCBI',
+                text='Fetch accession directly',
                 command=self.fetch_ncbi,
-                font=('Helvetica', 24, 'bold'),
+                font=('Helvetica', 20, 'bold'),
             )
             self.ncbi_fetch_button.grid(row=row, column=0, pady=8, padx=10, sticky='ew')
             self.ncbi_load_button = customtkinter.CTkButton(
@@ -127,7 +208,7 @@ class App(customtkinter.CTk):
                 text='Load cached NCBI record',
                 command=self.load_cached_ncbi_record,
                 state='disabled',
-                font=('Helvetica', 24, 'bold'),
+                font=('Helvetica', 20, 'bold'),
             )
             self.ncbi_load_button.grid(row=row, column=1, pady=8, padx=10, sticky='ew')
             row += 1
@@ -163,6 +244,154 @@ class App(customtkinter.CTk):
         )
         self.source_status.grid(row=row, column=0, pady=6, padx=10, sticky='ew', columnspan=2)
         return row + 1
+
+    def search_ncbi_organism(self):
+        taxon = self.ncbi_organism.get().strip()
+        if not taxon:
+            self._status('Enter an organism name or NCBI TaxID')
+            return
+        self._status('Searching NCBI assemblies...')
+        self.ncbi_search_button.configure(state='disabled')
+
+        def worker():
+            try:
+                assemblies = search_ncbi_assemblies(taxon, limit=30)
+                self.after(0, lambda assemblies=assemblies: self._finish_ncbi_assemblies(assemblies))
+            except Exception as exc:
+                button = self.ncbi_search_button
+                self.after(0, lambda exc=exc, button=button: self._finish_remote_error(exc, button))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_ncbi_assemblies(self, assemblies):
+        if hasattr(self, 'ncbi_search_button') and self.ncbi_search_button.winfo_exists():
+            self.ncbi_search_button.configure(state='normal')
+        if not assemblies:
+            self._status('No current RefSeq assemblies were found for that organism')
+            return
+        if not hasattr(self, 'ncbi_assembly_menu') or not self.ncbi_assembly_menu.winfo_exists():
+            return
+        self.ncbi_assembly_map = {}
+        labels = []
+        for assembly in assemblies:
+            tag = ' [reference]' if assembly.is_reference else ' [representative]' if assembly.is_representative else ''
+            label = f'{assembly.assembly_name or assembly.accession} — {assembly.accession}{tag}'
+            if assembly.synonym:
+                label += f' — {assembly.synonym}'
+            labels.append(label)
+            self.ncbi_assembly_map[label] = assembly
+        self.ncbi_assembly_menu.configure(values=labels, state='normal')
+        self.ncbi_assembly_menu.set(labels[0])
+        self.load_ncbi_sequences()
+
+    def _selected_ncbi(self):
+        if not hasattr(self, 'ncbi_assembly_menu'):
+            return None, None
+        assembly = self.ncbi_assembly_map.get(self.ncbi_assembly_menu.get())
+        chromosome = self.ncbi_sequence_map.get(self.ncbi_sequence_menu.get())
+        return assembly, chromosome
+
+    def load_ncbi_sequences(self):
+        assembly = self.ncbi_assembly_map.get(self.ncbi_assembly_menu.get())
+        if assembly is None:
+            return
+        self._status(f'Loading chromosomes for {assembly.accession}...')
+
+        def worker():
+            try:
+                records = list_ncbi_sequences(assembly.accession, chromosomes_only=True)
+                self.after(0, lambda records=records: self._finish_ncbi_sequences(records))
+            except Exception as exc:
+                self.after(0, lambda exc=exc: self._status(str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_ncbi_sequences(self, records):
+        if not hasattr(self, 'ncbi_sequence_menu') or not self.ncbi_sequence_menu.winfo_exists():
+            return
+        self.ncbi_sequence_map = {'Whole assembly': None}
+        labels = ['Whole assembly']
+        for record in records:
+            accession = record.refseq_accession or record.genbank_accession or record.sequence_name
+            label = f'chr{record.chromosome} — {accession} — {record.length:,} bp'
+            labels.append(label)
+            self.ncbi_sequence_map[label] = record.chromosome
+        self.ncbi_sequence_menu.configure(values=labels, state='normal')
+        self.ncbi_sequence_menu.set(labels[0])
+        self.ncbi_download_button.configure(state='normal')
+        self.ncbi_index_button.configure(state='normal')
+        self._status('Choose the whole assembly or one chromosome. Downloads are cached locally.')
+
+    def download_selected_ncbi(self):
+        assembly, chromosome = self._selected_ncbi()
+        if assembly is None:
+            self._status('Choose an NCBI assembly first')
+            return
+        self._status('Downloading / checking NCBI cache...')
+        self.ncbi_download_button.configure(state='disabled')
+
+        def worker():
+            try:
+                result = download_ncbi_genome(
+                    assembly.accession,
+                    chromosomes=[chromosome] if chromosome else None,
+                )
+                self.after(0, lambda result=result: self._finish_selected_ncbi_download(result))
+            except Exception as exc:
+                button = self.ncbi_download_button
+                self.after(0, lambda exc=exc, button=button: self._finish_remote_error(exc, button))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_selected_ncbi_download(self, result):
+        self.cached_ncbi = result
+        if hasattr(self, 'ncbi_download_button') and self.ncbi_download_button.winfo_exists():
+            self.ncbi_download_button.configure(state='normal')
+        if hasattr(self, 'ncbi_load_button') and self.ncbi_load_button.winfo_exists():
+            self.ncbi_load_button.configure(state='normal')
+        if len(result.records) == 1 and result.records[0].length <= 10_000_000:
+            _, sequence = read_fasta_record(result.fasta_path, result.records[0].name)
+            self._put_sequence(sequence, f'{result.records[0].name} from NCBI')
+        else:
+            state = 'Using cached' if result.cached else 'Downloaded'
+            self._status(f'{state} reference at {result.fasta_path}. Large records stay on disk for indexed analysis.')
+
+    def build_selected_ncbi_index(self):
+        assembly, chromosome = self._selected_ncbi()
+        if assembly is None:
+            self._status('Choose an NCBI assembly first')
+            return
+        pam = self.index_pam.get().strip() or 'NGG'
+        try:
+            spacer_length = int(self.index_spacer.get())
+        except ValueError:
+            self._status('Spacer length must be an integer')
+            return
+        pam_side = self.index_pam_side.get()
+        self._status('Building or checking the off-target index...')
+        self.ncbi_index_button.configure(state='disabled')
+
+        def worker():
+            try:
+                result = build_or_reuse_ncbi_index(
+                    assembly.accession,
+                    chromosomes=[chromosome] if chromosome else None,
+                    pam=pam,
+                    spacer_length=spacer_length,
+                    pam_side=pam_side,
+                )
+                self.after(0, lambda result=result: self._finish_ncbi_index(result))
+            except Exception as exc:
+                button = self.ncbi_index_button
+                self.after(0, lambda exc=exc, button=button: self._finish_remote_error(exc, button))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_ncbi_index(self, result):
+        if hasattr(self, 'ncbi_index_button') and self.ncbi_index_button.winfo_exists():
+            self.ncbi_index_button.configure(state='normal')
+        state = 'Reused cached' if result.cached else 'Built'
+        self._status(f'{state} off-target index: {result.index_prefix}')
 
     def fetch_ncbi(self):
         accession = self.ncbi_accession.get().strip()

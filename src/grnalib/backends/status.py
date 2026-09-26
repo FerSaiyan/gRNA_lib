@@ -28,4 +28,13 @@ def backend_status() -> dict:
                 'commercial users should review or obtain the appropriate license.'
             ),
         },
+        'crispr_ots': {
+            'available': which('crispr-ots') is not None,
+            'kind': 'external-command',
+            'purpose': 'whole-genome off-target locus enumeration and mismatch profiling',
+            'note': (
+                'The profiler uses the current GuideScan2-compatible per-hit CSV output. '
+                'The crispr-ots bin scanner currently supports mismatches but not non-zero RNA/DNA bulges.'
+            ),
+        },
     }

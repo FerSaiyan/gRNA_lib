@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grna-lib"
+version = "0.2.0"
+description = "Local-first CRISPR gRNA and prime-edit candidate design with Tkinter, web, CLI and MCP frontends"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["typer>=0.12"]
+
+[project.optional-dependencies]
+ui = ["customtkinter>=5.2"]
+web = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2"]
+mcp = ["mcp>=1.0"]
+rs3 = ["rs3"]
+deepprime = ["genet; python_version < '3.11'"]
+dev = ["pytest>=8"]
+all = [
+  "customtkinter>=5.2",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2",
+  "mcp>=1.0",
+  "rs3",
+  "genet; python_version < '3.11'",
+]
+
+[project.scripts]
+grna-lib = "grnalib.cli:main"
+grna-lib-tk = "grnalib.tkinter_app:main"
+grna-lib-mcp = "grnalib.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grnalib"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -31,6 +32,80 @@ class FastaRecordInfo:
         }
 
 
+
+
+@dataclass(frozen=True)
+class NcbiAssembly:
+    accession: str
+    organism_name: str
+    tax_id: int | None
+    assembly_name: str
+    assembly_level: str
+    source_database: str
+    refseq_category: str
+    release_date: str
+    submitter: str
+    description: str
+    synonym: str
+
+    @property
+    def is_reference(self) -> bool:
+        return "reference genome" in self.refseq_category.lower()
+
+    @property
+    def is_representative(self) -> bool:
+        return "representative genome" in self.refseq_category.lower()
+
+    def to_dict(self) -> dict:
+        return {
+            "accession": self.accession,
+            "organism_name": self.organism_name,
+            "tax_id": self.tax_id,
+            "assembly_name": self.assembly_name,
+            "assembly_level": self.assembly_level,
+            "source_database": self.source_database,
+            "refseq_category": self.refseq_category,
+            "release_date": self.release_date,
+            "submitter": self.submitter,
+            "description": self.description,
+            "synonym": self.synonym,
+            "is_reference": self.is_reference,
+            "is_representative": self.is_representative,
+        }
+
+
+@dataclass(frozen=True)
+class NcbiSequenceRecord:
+    assembly_accession: str
+    chromosome: str
+    sequence_name: str
+    refseq_accession: str
+    genbank_accession: str
+    ucsc_style_name: str
+    length: int
+    role: str
+    assembly_unit: str
+    location_type: str
+
+    @property
+    def display_name(self) -> str:
+        return self.chromosome or self.sequence_name or self.refseq_accession or self.genbank_accession
+
+    def to_dict(self) -> dict:
+        return {
+            "assembly_accession": self.assembly_accession,
+            "chromosome": self.chromosome,
+            "sequence_name": self.sequence_name,
+            "refseq_accession": self.refseq_accession,
+            "genbank_accession": self.genbank_accession,
+            "ucsc_style_name": self.ucsc_style_name,
+            "length": self.length,
+            "role": self.role,
+            "assembly_unit": self.assembly_unit,
+            "location_type": self.location_type,
+            "display_name": self.display_name,
+        }
+
 @dataclass(frozen=True)
 class GenomeDownload:
     source: str
@@ -38,6 +113,7 @@ class GenomeDownload:
     fasta_path: Path
     records: tuple[FastaRecordInfo, ...]
     requested_chromosomes: tuple[str, ...] = ()
+    cached: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -46,6 +122,7 @@ class GenomeDownload:
             "fasta_path": str(self.fasta_path),
             "records": [record.to_dict() for record in self.records],
             "requested_chromosomes": list(self.requested_chromosomes),
+            "cached": self.cached,
         }
 
 
@@ -159,6 +236,184 @@ def parse_fasta_text(text: str) -> list[tuple[str, str]]:
     return records
 
 
+
+def _get_json(url: str, *, timeout: int = 60) -> dict:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"NCBI metadata request failed: {exc}") from exc
+
+
+def _value(mapping: dict | None, *keys, default=None):
+    if not mapping:
+        return default
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return default
+
+
+def _assembly_from_report(report: dict) -> NcbiAssembly:
+    organism = _value(report, "organism", default={})
+    info = _value(report, "assemblyInfo", "assembly_info", default={})
+    accession = str(_value(report, "accession", default=""))
+    return NcbiAssembly(
+        accession=accession,
+        organism_name=str(_value(organism, "organismName", "organism_name", "sciName", "sci_name", default="")),
+        tax_id=_value(organism, "taxId", "tax_id"),
+        assembly_name=str(_value(info, "assemblyName", "assembly_name", default="")),
+        assembly_level=str(_value(info, "assemblyLevel", "assembly_level", default="")),
+        source_database=str(_value(report, "sourceDatabase", "source_database", default="")),
+        refseq_category=str(_value(info, "refseqCategory", "refseq_category", default="")),
+        release_date=str(_value(info, "releaseDate", "release_date", default="")),
+        submitter=str(_value(info, "submitter", default="")),
+        description=str(_value(info, "description", default="")),
+        synonym=str(_value(info, "synonym", default="")),
+    )
+
+
+def search_ncbi_assemblies(
+    taxon: str,
+    *,
+    limit: int = 20,
+    source: str = "refseq",
+    exact_match: bool = True,
+    reference_only: bool = False,
+    timeout: int = 60,
+) -> tuple[NcbiAssembly, ...]:
+    """Find current NCBI genome assemblies by scientific/common taxon name or TaxID."""
+    taxon = taxon.strip()
+    if not taxon:
+        raise ValueError("taxon is required")
+    if limit < 1 or limit > 1000:
+        raise ValueError("limit must be between 1 and 1000")
+    if source not in {"all", "refseq", "genbank"}:
+        raise ValueError("source must be all, refseq, or genbank")
+
+    params: list[tuple[str, str]] = [
+        ("page_size", str(limit)),
+        ("tax_exact_match", str(exact_match).lower()),
+        ("filters.exclude_paired_reports", "true"),
+        ("filters.exclude_atypical", "true"),
+        ("filters.assembly_version", "current"),
+        ("filters.assembly_source", source),
+    ]
+    if reference_only:
+        params.append(("filters.reference_only", "true"))
+    query = urllib.parse.urlencode(params)
+    url = (
+        f"{NCBI_DATASETS_BASE}/genome/taxon/"
+        f"{urllib.parse.quote(taxon, safe='')}/dataset_report?{query}"
+    )
+    payload = _get_json(url, timeout=timeout)
+    assemblies = [
+        _assembly_from_report(report)
+        for report in payload.get("reports", [])
+        if _value(report, "accession")
+    ]
+
+    def order(item: NcbiAssembly):
+        category = 0 if item.is_reference else 1 if item.is_representative else 2
+        refseq = 0 if item.accession.startswith("GCF_") else 1
+        level = {"Complete Genome": 0, "Chromosome": 1, "Scaffold": 2, "Contig": 3}.get(
+            item.assembly_level, 4
+        )
+        return (category, refseq, level, item.assembly_name, item.accession)
+
+    return tuple(sorted(assemblies, key=order))
+
+
+def list_ncbi_sequences(
+    accession: str,
+    *,
+    chromosomes_only: bool = False,
+    timeout: int = 60,
+) -> tuple[NcbiSequenceRecord, ...]:
+    """List sequence/chromosome metadata for one NCBI assembly accession."""
+    accession = accession.strip().upper()
+    if not (accession.startswith("GCF_") or accession.startswith("GCA_")):
+        raise ValueError("NCBI assembly accession must start with GCF_ or GCA_")
+
+    params = urllib.parse.urlencode({"page_size": 1000})
+    url = (
+        f"{NCBI_DATASETS_BASE}/genome/accession/"
+        f"{urllib.parse.quote(accession, safe='')}/sequence_reports?{params}"
+    )
+    payload = _get_json(url, timeout=timeout)
+    records: list[NcbiSequenceRecord] = []
+    for report in payload.get("reports", []):
+        chromosome = str(_value(report, "chrName", "chr_name", default=""))
+        role = str(_value(report, "role", default=""))
+        if chromosomes_only and not chromosome:
+            continue
+        records.append(
+            NcbiSequenceRecord(
+                assembly_accession=str(_value(report, "assemblyAccession", "assembly_accession", default=accession)),
+                chromosome=chromosome,
+                sequence_name=str(_value(report, "sequenceName", "sequence_name", default="")),
+                refseq_accession=str(_value(report, "refseqAccession", "refseq_accession", default="")),
+                genbank_accession=str(_value(report, "genbankAccession", "genbank_accession", default="")),
+                ucsc_style_name=str(_value(report, "ucscStyleName", "ucsc_style_name", default="")),
+                length=int(_value(report, "length", default=0) or 0),
+                role=role,
+                assembly_unit=str(_value(report, "assemblyUnit", "assembly_unit", default="")),
+                location_type=str(
+                    _value(
+                        report,
+                        "assignedMoleculeLocationType",
+                        "assigned_molecule_location_type",
+                        default="",
+                    )
+                ),
+            )
+        )
+
+    return tuple(
+        sorted(
+            records,
+            key=lambda item: (
+                0 if item.chromosome else 1,
+                int(item.chromosome) if item.chromosome.isdigit() else 10_000,
+                item.chromosome,
+                item.sequence_name,
+            ),
+        )
+    )
+
+
+def ncbi_cache_status(
+    accession: str,
+    *,
+    chromosomes: Iterable[str] | None = None,
+    cache_dir: str | Path | None = None,
+) -> dict:
+    accession = accession.strip().upper()
+    chromosome_list = tuple(
+        chromosome.strip() for chromosome in (chromosomes or ()) if chromosome.strip()
+    )
+    cache_root = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+    key = accession + (
+        "__" + "-".join(chromosome_list).replace("/", "_")
+        if chromosome_list else "__all"
+    )
+    target_dir = cache_root.expanduser() / "ncbi" / key
+    existing = sorted(target_dir.glob("*_genomic.fna")) + sorted(target_dir.glob("genomic.fna"))
+    return {
+        "accession": accession,
+        "chromosomes": list(chromosome_list),
+        "cached": bool(existing),
+        "fasta_path": str(existing[0]) if existing else None,
+    }
+
+
 def _download_to_file(url: str, destination: Path, *, timeout: int) -> None:
     request = urllib.request.Request(
         url,
@@ -233,6 +488,7 @@ def download_ncbi_genome(
             fasta_path=fasta_path,
             records=fasta_records(fasta_path),
             requested_chromosomes=chromosome_list,
+            cached=True,
         )
 
     params: list[tuple[str, str]] = [
@@ -263,6 +519,7 @@ def download_ncbi_genome(
         fasta_path=fasta_path,
         records=fasta_records(fasta_path),
         requested_chromosomes=chromosome_list,
+        cached=False,
     )
 
 

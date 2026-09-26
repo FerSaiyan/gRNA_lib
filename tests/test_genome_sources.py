@@ -57,6 +57,7 @@ def test_ncbi_download_builds_chromosome_filtered_request_and_caches(tmp_path, m
     assert result.records[0].name == "NC_000023.11"
     assert result.records[0].length == 8
     assert result.fasta_path.exists()
+    assert result.cached is False
 
     def should_not_download(*args, **kwargs):
         raise AssertionError("cache should have been used")
@@ -68,6 +69,7 @@ def test_ncbi_download_builds_chromosome_filtered_request_and_caches(tmp_path, m
         cache_dir=tmp_path,
     )
     assert cached.fasta_path == result.fasta_path
+    assert cached.cached is True
 
 
 def test_ensembl_region_request_returns_normalized_sequence(monkeypatch):
@@ -94,3 +96,97 @@ def test_ensembl_region_request_returns_normalized_sequence(monkeypatch):
     )
     assert sequence == "ACGTACGT"
     assert "/sequence/region/homo_sapiens/17:7668402..7668500:1" in seen["url"]
+
+
+def test_ncbi_assembly_search_parses_and_prioritizes_reference(monkeypatch):
+    payload = {
+        "reports": [
+            {
+                "accession": "GCF_999999999.1",
+                "sourceDatabase": "SOURCE_DATABASE_REFSEQ",
+                "organism": {"taxId": 9606, "organismName": "Homo sapiens"},
+                "assemblyInfo": {
+                    "assemblyName": "Other",
+                    "assemblyLevel": "Chromosome",
+                    "refseqCategory": "representative genome",
+                    "releaseDate": "2026-01-01",
+                },
+            },
+            {
+                "accession": "GCF_000001405.40",
+                "sourceDatabase": "SOURCE_DATABASE_REFSEQ",
+                "organism": {"taxId": 9606, "organismName": "Homo sapiens"},
+                "assemblyInfo": {
+                    "assemblyName": "GRCh38.p14",
+                    "assemblyLevel": "Chromosome",
+                    "refseqCategory": "reference genome",
+                    "releaseDate": "2022-02-03",
+                    "synonym": "hg38",
+                },
+            },
+        ]
+    }
+    seen = {}
+
+    def fake_get_json(url, *, timeout):
+        seen["url"] = url
+        return payload
+
+    monkeypatch.setattr(genome_sources, "_get_json", fake_get_json)
+    assemblies = genome_sources.search_ncbi_assemblies("Homo sapiens", limit=10)
+    assert assemblies[0].accession == "GCF_000001405.40"
+    assert assemblies[0].is_reference is True
+    assert assemblies[0].synonym == "hg38"
+    assert "tax_exact_match=true" in seen["url"]
+    assert "filters.assembly_source=refseq" in seen["url"]
+
+
+def test_ncbi_sequence_report_lists_chromosome_metadata(monkeypatch):
+    payload = {
+        "reports": [
+            {
+                "assemblyAccession": "GCF_000001405.40",
+                "chrName": "17",
+                "sequenceName": "17",
+                "refseqAccession": "NC_000017.11",
+                "genbankAccession": "CM000679.2",
+                "ucscStyleName": "chr17",
+                "length": 83257441,
+                "role": "assembled-molecule",
+                "assemblyUnit": "Primary Assembly",
+                "assignedMoleculeLocationType": "Chromosome",
+            },
+            {
+                "assemblyAccession": "GCF_000001405.40",
+                "sequenceName": "KI270728.1",
+                "refseqAccession": "NT_187361.1",
+                "length": 1872759,
+                "role": "unplaced-scaffold",
+            },
+        ]
+    }
+
+    monkeypatch.setattr(genome_sources, "_get_json", lambda url, timeout: payload)
+    records = genome_sources.list_ncbi_sequences("GCF_000001405.40")
+    assert records[0].chromosome == "17"
+    assert records[0].ucsc_style_name == "chr17"
+    assert records[0].refseq_accession == "NC_000017.11"
+
+    chromosomes = genome_sources.list_ncbi_sequences(
+        "GCF_000001405.40", chromosomes_only=True
+    )
+    assert [record.chromosome for record in chromosomes] == ["17"]
+
+
+def test_ncbi_cache_status_reports_existing_download(tmp_path):
+    target = tmp_path / "ncbi" / "GCF_000001405.40__17"
+    target.mkdir(parents=True)
+    fasta = target / "human_genomic.fna"
+    fasta.write_text(">chr17\nACGT\n", encoding="utf-8")
+    status = genome_sources.ncbi_cache_status(
+        "GCF_000001405.40",
+        chromosomes=["17"],
+        cache_dir=tmp_path,
+    )
+    assert status["cached"] is True
+    assert status["fasta_path"] == str(fasta)

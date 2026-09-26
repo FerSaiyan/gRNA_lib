@@ -16,7 +16,15 @@ from . import (
     score_prime_candidates_deepprime,
 )
 from .backends import profile_with_crispr_ots, score_with_crisprware
-from .genome_sources import download_ncbi_genome, fetch_ensembl_region, read_fasta_record
+from .genome_sources import (
+    download_ncbi_genome,
+    fetch_ensembl_region,
+    list_ncbi_sequences,
+    ncbi_cache_status,
+    read_fasta_record,
+    search_ncbi_assemblies,
+)
+from .reference_workflows import build_or_reuse_ncbi_index
 
 app = FastAPI(title='gRNA Library')
 
@@ -57,6 +65,17 @@ class NcbiSourceRequest(BaseModel):
     chromosomes: list[str] = Field(default_factory=list)
     record: str | None = None
     inline_limit: int = 10_000_000
+
+
+class NcbiIndexRequest(BaseModel):
+    accession: str
+    chromosomes: list[str] = Field(default_factory=list)
+    pam: str = 'NGG'
+    spacer_length: int = 20
+    pam_side: str = '3prime'
+    bin_width: int | None = None
+    force: bool = False
+    crisprware_executable: str = 'crisprware'
 
 
 class EnsemblSourceRequest(BaseModel):
@@ -153,6 +172,62 @@ def api_profile(request: GenomeProfileRequest):
             hit_limit=request.hit_limit,
         )
         return {'nuclease': spec.__dict__, **result.to_dict()}
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get('/api/sources/ncbi/assemblies')
+def api_ncbi_assemblies(
+    taxon: str,
+    limit: int = 20,
+    source: str = 'refseq',
+    exact_match: bool = True,
+    reference_only: bool = False,
+):
+    try:
+        assemblies = search_ncbi_assemblies(
+            taxon,
+            limit=limit,
+            source=source,
+            exact_match=exact_match,
+            reference_only=reference_only,
+        )
+        return {'taxon': taxon, 'assemblies': [item.to_dict() for item in assemblies]}
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get('/api/sources/ncbi/{accession}/sequences')
+def api_ncbi_sequences(accession: str, chromosomes_only: bool = True):
+    try:
+        records = list_ncbi_sequences(accession, chromosomes_only=chromosomes_only)
+        return {'accession': accession, 'sequences': [item.to_dict() for item in records]}
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get('/api/sources/ncbi/{accession}/cache')
+def api_ncbi_cache(accession: str, chromosome: list[str] | None = None):
+    try:
+        return ncbi_cache_status(accession, chromosomes=chromosome)
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post('/api/sources/ncbi/index')
+def api_ncbi_index(request: NcbiIndexRequest):
+    try:
+        result = build_or_reuse_ncbi_index(
+            request.accession,
+            chromosomes=request.chromosomes,
+            pam=request.pam,
+            spacer_length=request.spacer_length,
+            pam_side=request.pam_side,
+            bin_width=request.bin_width,
+            force=request.force,
+            crisprware_executable=request.crisprware_executable,
+        )
+        return result.to_dict()
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

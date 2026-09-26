@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .design import design_guides
 from .models import GuideCandidate, NucleaseSpec, OffTargetSummary
@@ -31,7 +31,7 @@ def rs3_sequence_score(guide: GuideCandidate, tracr: str = 'Hsu2013') -> tuple[f
     try:
         value = float(predict_seq([guide.context], sequence_tracr=tracr)[0])
         return value, None
-    except Exception as exc:  # pragma: no cover - optional dependency behavior
+    except Exception as exc:
         return None, f'RS3 scoring failed: {exc}'
 
 
@@ -53,13 +53,9 @@ def local_offtarget_summary(
             continue
         counts[d] += 1
 
-    # One exact match is the intended target. Coordinates are often local to the
-    # input target sequence rather than the supplied genome, so subtract by
-    # sequence identity instead of pretending those coordinate systems align.
     if counts[0] > 0:
         counts[0] -= 1
 
-    # Deliberately named a proxy: this is transparent mismatch weighting, not CFD.
     burden = (
         counts[0] * 2.0 + counts[1] * 1.0 + counts[2] * 0.25 +
         counts[3] * 0.10 + counts[4] * 0.05
@@ -81,6 +77,8 @@ def rank_guides(
     genome_sequence: str | None = None,
     use_rs3: bool = True,
     tracr: str = 'Hsu2013',
+    indexed_specificity: Mapping[str, float] | None = None,
+    indexed_specificity_source: str | None = None,
 ) -> list[GuideCandidate]:
     ranked: list[GuideCandidate] = []
     for original in guides:
@@ -98,15 +96,32 @@ def rank_guides(
             if reason:
                 guide.scores['rs3_note'] = reason
 
+        local_specificity = None
         if genome_sequence:
-            off = local_offtarget_summary(guide, genome_sequence, spec)
-            guide.scores['off_target'] = off.to_dict()
-            specificity = off.specificity_proxy
-        else:
-            guide.scores['off_target'] = None
-            specificity = 1.0
+            local = local_offtarget_summary(guide, genome_sequence, spec)
+            guide.scores['local_off_target'] = local.to_dict()
+            local_specificity = local.specificity_proxy
 
-        # Ranking is hierarchical rather than pretending unrelated models are calibrated.
+        external_score = None
+        if indexed_specificity is not None:
+            value = indexed_specificity.get(guide.id)
+            if value is not None:
+                external_score = float(value)
+                guide.scores['indexed_specificity'] = {
+                    'score': external_score,
+                    'source': indexed_specificity_source or 'external-index',
+                }
+
+        if external_score is not None:
+            specificity = external_score
+            guide.scores['specificity_used_for_ranking'] = 'indexed'
+        elif local_specificity is not None:
+            specificity = local_specificity
+            guide.scores['specificity_used_for_ranking'] = 'local-proxy'
+        else:
+            specificity = 1.0
+            guide.scores['specificity_used_for_ranking'] = 'not-available'
+
         guide.scores['_sort'] = (
             1 if guide.scores['hard_filter_pass'] else 0,
             specificity,

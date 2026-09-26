@@ -15,6 +15,7 @@ from .backends import (
     profile_with_crispr_ots,
     score_with_crisprware,
 )
+from .genome_sources import download_ncbi_genome, fetch_ensembl_region
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -115,6 +116,29 @@ def profile_genome_offtargets(
         hit_limit=hit_limit,
     )
     return result.to_dict()
+
+
+@mcp.tool()
+def fetch_ncbi_genome(
+    accession: str,
+    chromosomes: list[str] | None = None,
+) -> dict:
+    """Download/cache an NCBI assembly or selected chromosomes and return local FASTA metadata."""
+    result = download_ncbi_genome(accession, chromosomes=chromosomes)
+    return result.to_dict()
+
+
+@mcp.tool()
+def fetch_ensembl_region_sequence(species: str, region: str) -> dict:
+    """Fetch a genomic region from Ensembl REST."""
+    sequence = fetch_ensembl_region(species, region)
+    return {
+        'source': 'Ensembl REST',
+        'species': species,
+        'region': region,
+        'length': len(sequence),
+        'sequence': sequence,
+    }
 
 
 @mcp.tool()
